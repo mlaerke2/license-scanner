@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?><database>
+    <element attributes="enforce_dot_walk_cross_scope_access=true" db_object_id="fdae5a25c3b8d710c8fa98ec050131d7" label="Scan History" max_length="40" name="x_delde_license_scan_history" type="collection">
+        <element default="0" label="Business Stakeholder" max_length="40" name="business_stakeholder" type="integer"/>
+        <element default="0" label="Counted under higher license" max_length="40" name="counted_elsewhere" type="integer"/>
+        <element default="0" label="Fulfiller" max_length="40" name="fulfiller" type="integer"/>
+        <element default="false" label="Latest in week" max_length="40" name="period_latest" type="boolean"/>
+        <element default="0" label="Requester" max_length="40" name="requester" type="integer"/>
+        <element label="Scan run" max_length="32" name="scan_run" type="string"/>
+        <element label="Scanned on" max_length="40" name="scanned_on" type="glide_date_time"/>
+        <element label="Subscription" max_length="32" name="subscription" reference="x_delde_license_subscription" type="reference"/>
+        <element default="0" label="Users" max_length="40" name="users" type="integer"/>
+        <index name="index">
+            <element name="subscription"/>
+        </index>
+    </element>
+</database>
