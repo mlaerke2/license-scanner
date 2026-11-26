@@ -126,8 +126,8 @@ ScannerUtils.prototype = {
         if (!associatedRoles) return [];
 
         var ga = new GlideAggregate('sys_user_has_role');
-        // '!=true' (not '=false'): the flag is empty on many users and '=false' would skip them
-        ga.addEncodedQuery('role.nameIN' + associatedRoles + '^user.active=true^user.web_service_access_only!=true');
+        // The flag is empty on many users: '=false' and '!=true' both skip empty values, so test for empty OR false
+        ga.addEncodedQuery('role.nameIN' + associatedRoles + '^user.active=true^user.web_service_access_onlyISEMPTY^ORuser.web_service_access_only=false');
         if (!this.includeInheritedRoles) ga.addNullQuery('included_in_role');
         ga.addNotNullQuery('user');
         ga.groupBy('user');
