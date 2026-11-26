@@ -60,9 +60,11 @@ Choose one of the two options.
 
 1. Give `usage_admin` to the users who will run the scanner.
 2. Create the license subscriptions (see [Configuring a license subscription](#configuring-a-license-subscription)) or import the examples.
-3. Review the [system properties](#system-properties).
+3. Review the [system properties](#system-properties) under **License Scanner → Administration → Properties**.
 
-The dashboard is included and opens from **License Scanner → Dashboard**. It shows the latest scan of every subscription:
+The dashboard is included and opens from **License Scanner → Dashboard**.
+
+The **Overview** tab shows the latest scan of every subscription:
 
 | Widget | Shows |
 |---|---|
@@ -71,6 +73,24 @@ The dashboard is included and opens from **License Scanner → Dashboard**. It s
 | Acting as per subscription | The same split for each subscription, so you can see which module the savings are in. |
 | Fulfiller – review required | Users with a Fulfiller license who act as Business Stakeholder or Requester (possible savings). |
 | Business Stakeholder – review required | Users with a Business Stakeholder license who act as Requester or Fulfiller. |
+
+The **Trend** tab shows the weekly development from [Scan History](#scan-history-x_delde_license_scan_history):
+
+| Widget | Shows |
+|---|---|
+| Users by behaviour over time | Fulfiller, Business Stakeholder and Requester across all subscriptions, per week. |
+| Unused licenses (Requester) per subscription | Users who hold a license but act as Requester, per subscription and week. |
+
+### Menu
+
+| Module | Opens |
+|---|---|
+| License definition | License subscriptions. |
+| License Monitors | One record per user per scan. |
+| Scan History | One record per subscription per scan. |
+| Dashboard | The License Scanner dashboard. |
+| Administration → Properties | The app's system properties (admin only). |
+| Administration → ScanUtils, Schedule Job, Business rule | The app's code (admin only). |
 
 ---
 
@@ -110,6 +130,22 @@ Each record is one user in one scan of one subscription.
 | Latest | True for the records that count now. The dashboard shows only these. |
 | Status | *Completed*, or *Skipped* when the user is counted under another subscription in the same module. |
 
+### Scan History (`x_delde_license_scan_history`)
+
+One record per subscription per scan, used for trends.
+
+| Field | Description |
+|---|---|
+| Subscription | The license subscription that was scanned. |
+| Scan run | The same run identifier as on the monitor records. |
+| Scanned on | When the scan finished. |
+| Users | Users in the scan. |
+| Fulfiller, Business Stakeholder, Requester | Users counted in this subscription with that behaviour. |
+| Counted under higher license | Users counted under another subscription in the same module. |
+| Latest in week | True for the newest scan of the subscription in that week. Trend charts use only these, so extra scans in a week are not counted twice. |
+
+The counts are updated if a later scan in the same module moves users between subscriptions.
+
 ---
 
 ## How a scan works
@@ -125,7 +161,7 @@ Each record is one user in one scan of one subscription.
    The Fulfiller check runs only for subscriptions at Fulfiller level. Business Stakeholder roles are read-only, and ACLs stop those users from doing fulfilling work, so their subscriptions classify users as Business Stakeholder or Requester. Set `x_delde_license.check_fulfiller_below_fulfiller` to true to run the check anyway, for example to test for gaps in custom ACLs.
 5. **Store.** One monitor record per user is created with the evidence. Earlier results are kept as history (*Latest* = false) and deleted after the retention period.
 6. **One classification per module.** See below.
-7. **Finish.** The subscription gets **Completed (500)** and a summary in *Scan message*. If anything fails it gets **Error (600)** with the error.
+7. **Finish.** The subscription gets **Completed (500)** and a summary in *Scan message*, and a Scan History record is written. If anything fails it gets **Error (600)** with the error.
 
 ### One classification per user per module
 
@@ -147,7 +183,7 @@ The user's records in the other subscriptions get *Status* = *Skipped*, *Latest*
 | `x_delde_license.include_inherited_roles` | false | Also count roles that a user holds only because a licensed role they hold contains them. |
 | `x_delde_license.check_fulfiller_below_fulfiller` | false | Also look for Fulfiller activity in subscriptions below Fulfiller level. Useful to test for ACL gaps. |
 | `x_delde_license.ignored_audit_fields` | comments,watch_list,sys_tags | Audited fields that do not count as fulfilling work. |
-| `x_delde_license.history_retention_days` | 365 | How long earlier scan results are kept. 0 keeps them forever. |
+| `x_delde_license.history_retention_days` | 365 | How long earlier monitor records are kept. 0 keeps them forever. Scan History is kept. |
 | `x_delde_license.stuck_scan_hours` | 6 | After this many hours *In Progress*, the scheduled job sets the scan to *Error* so it can run again. |
 
 ---
@@ -187,7 +223,7 @@ To import them, open the **License Subscription** list, right-click a column hea
 - **Modules are found from shared tables.** Two subscriptions with no table in common are treated as separate modules, even if they cover the same license.
 - **Approvals are not limited to the associated tables.** Any approval in the lookback period counts towards Business Stakeholder.
 - **The Business Stakeholder checks for approvals and views have only been tested with little data.** The Fulfiller path has been verified on a test instance.
-- **Cross-scope privileges** cover only some of the monitored tables. The app depends on *runtime access tracking* being set to *permissive*.
+- **Cross-scope privileges** are included for the ITSM, CSM, IRM and Agile tables used on the test instance. Other modules need *runtime access tracking* set to *permissive*, or privileges added for their tables.
 - **The example subscriptions hold sys_ids from the instance they were built on.** See the note under [Example subscriptions](#example-subscriptions).
 
 ---
