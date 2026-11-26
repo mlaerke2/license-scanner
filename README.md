@@ -83,7 +83,7 @@ The **Trend** tab shows the weekly development from [Scan History](#scan-history
 
 ### Employee Center widget
 
-The app includes a portal page, `/esc?id=x_delde_license_usage`, with the **License usage** widget (`x-delde-license-usage`). It shows the same results as the dashboard in a form meant for license and process owners:
+The app includes a portal page, `/esc?id=licence_usage`, with the **License usage** widget (`x-delde-license-usage`). It shows the same results as the dashboard in a form meant for license and process owners:
 
 - a module filter (modules are found the same way as in the scanner: subscriptions that share tables),
 - four key figures: licensed users, users at license level, possible downgrades (Fulfiller license, Business Stakeholder use) and licenses not used (Requester),
