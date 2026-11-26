@@ -108,7 +108,7 @@ Each record is one user in one scan of one subscription.
 
 1. **Configure.** When you set *Application entitlement* and *Role type*, a business rule looks up the licensed roles in `license_role` and stores them in *Associated roles*. When you set *Associated tables*, another business rule stores the table names in *Table names*.
 2. **Start.** A scan starts from the **Scan license** UI action or from the scheduled job (weekly, Monday 00:00, every active subscription). Both set *Scan status* to **Initiated (200)**. The scheduled job first resets scans that have been *In Progress* for too long.
-3. **Find users.** `ScannerUtils.runScan()` sets **In Progress (300)** and finds active, interactive users who hold the associated roles, leaving out users with an excluded role (`admin` by default).
+3. **Find users.** `ScannerUtils.runScan()` sets **In Progress (300)** and finds active, interactive users who hold the associated roles, leaving out users with an excluded role (`admin` by default). A role does not count when the user also holds a licensed role that contains it: `sn_incident_read` that comes with `sn_incident_write` does not make a fulfiller a Business Stakeholder. Roles granted through groups count as normal.
 4. **Classify.** Each user is checked in this order, within the lookback period, and the first match wins:
    - **Fulfiller:** changed (`sys_audit`) a record in the associated tables that belongs to someone else. A record belongs to the person in *Caller*, *Requested for*, *Opened for*, *Contact*, *Consumer* or *Requested by*, or to its creator when none of those is filled in. Changes to the fields in `x_delde_license.ignored_audit_fields` (comments, watch list and tags by default) are ignored.
    - **Business Stakeholder:** approved or rejected something, or opened a record in the associated tables that belongs to someone else (classic UI and any workspace URL).
@@ -136,7 +136,7 @@ The user's records in the other subscriptions get *Status* = *Skipped*, *Latest*
 |---|---|---|
 | `x_delde_license.lookback_days` | 30 | Days of activity the scanner looks at. |
 | `x_delde_license.excluded_roles` | admin | Users with any of these roles are left out. |
-| `x_delde_license.include_inherited_roles` | false | Also count users who get a licensed role through another role. |
+| `x_delde_license.include_inherited_roles` | false | Also count roles that a user holds only because a licensed role they hold contains them. |
 | `x_delde_license.check_fulfiller_below_fulfiller` | false | Also look for Fulfiller activity in subscriptions below Fulfiller level. Useful to test for ACL gaps. |
 | `x_delde_license.ignored_audit_fields` | comments,watch_list,sys_tags | Audited fields that do not count as fulfilling work. |
 | `x_delde_license.history_retention_days` | 365 | How long earlier scan results are kept. 0 keeps them forever. |
