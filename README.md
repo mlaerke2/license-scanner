@@ -1,6 +1,8 @@
 # License Scanner for ServiceNow
 
-License Scanner is a scoped ServiceNow application (`x_delde_license`) that compares the licenses users **hold** with how they **actually use** the platform.
+This is shared for feedback and for people to try it out. It's possible to adapt the application to a specific setup by creating license definitions that fits your own purpose. This is not affiliated with ServiceNow. 
+
+License Scanner is an investigative app that can be used to explore user statistics that is not available in a ServiceNow instance normally. It compares the licenses users **hold** with how they **actually use** the platform.
 
 For each license definition it finds every user who has a licensed role. It then looks at what they did on the instance during the last 30 days and classifies each one as one of these:
 
