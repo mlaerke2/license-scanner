@@ -148,9 +148,15 @@ ScannerUtils.prototype = {
         var users = Object.keys(held);
         if (this.includeInheritedRoles || !users.length) return users;
 
-        // A role only counts when the user does not also hold a role that contains it
+        // A role only counts when the user does not also hold a licensed role that contains it
         // (for example sn_incident_read inside sn_incident_write). included_in_role is not
         // reliable for this, and inherited=true is also set for roles granted through groups.
+        // Only containing roles that are themselves licensed (in any subscription) take over the license
+        var licensed = {};
+        var subs = new GlideRecord(this.SUBSCRIPTION_TABLE);
+        subs.query();
+        while (subs.next()) (subs.getValue('associated_roles') || '').split(',').forEach(function(r) { r = r.trim(); if (r) licensed[r] = true; });
+
         var parents = {};   // child role -> [parent roles]
         var all = {};
         var c = new GlideRecord('sys_user_role_contains');
@@ -158,7 +164,7 @@ ScannerUtils.prototype = {
         c.query();
         while (c.next()) {
             var child = c.contains.name.toString(), parent = c.role.name.toString();
-            if (!parent || parent == child) continue;
+            if (!parent || parent == child || !licensed[parent]) continue;
             (parents[child] = parents[child] || []).push(parent);
             all[parent] = true;
         }
