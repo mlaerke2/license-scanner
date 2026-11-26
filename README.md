@@ -94,6 +94,70 @@ The **Trend** tab shows the weekly development from [Scan History](#scan-history
 
 ---
 
+## Upgrading from 1.0.0
+
+Version 1.1.0 has the same application sys_id and scope (`x_delde_license`) as 1.0.0, so the update set upgrades the app in place. License subscriptions and role assignments are kept. Try the upgrade on a sub-production instance first.
+
+### Before you install
+
+- **Back up the current version.** Open the application record (*System Applications → My Company Applications → License Scanner*), click **Publish to Update Set**, and export that update set as XML.
+- **Note local changes.** 1.1.0 replaces the dashboard, the business rules, the scheduled job and `ScannerUtils`. Changes made to them on the instance are overwritten.
+- **Do not link the installed app to this repository.** Linking an existing application pushes the instance's version into the repository. *Import from source control* only works when the app is not installed yet. Use the update set.
+
+### Install
+
+1. Import `license_scanner_update_set.xml` under **System Update Sets → Retrieved Update Sets**.
+2. Click **Preview Update Set**. In 1.0.0 the dashboard was in the Global scope with the same sys_ids. If the preview reports problems on the `par_dashboard_*` records, choose **Accept remote update** so the records move into the application scope.
+3. Click **Commit Update Set**. The application record now shows version 1.1.0.
+
+### Clean up data from 1.0.0
+
+Monitor records from 1.0.0 have no *Scan run* and no *Latest* value. They are not shown on the dashboard, and they are not retired or purged. Scans that 1.0.0 left *In Progress* never run again. Run this once under **System Definition → Scripts - Background**, with the scope set to **x_delde_license**:
+
+```javascript
+// Monitor records from 1.0.0 become history (purged after history_retention_days)
+var mon = new GlideRecord('x_delde_license_license_monitor');
+mon.addNullQuery('scan_run');
+mon.setValue('latest', false);
+mon.setWorkflow(false);
+mon.updateMultiple();
+
+// Scans left "In Progress" by 1.0.0 can run again
+var sub = new GlideRecord('x_delde_license_subscription');
+sub.addQuery('scan_status', '300');
+sub.setValue('scan_status', '100');
+sub.setValue('scan_message', 'Reset after upgrade to 1.1.0');
+sub.updateMultiple();
+```
+
+### Check the configuration
+
+- Review the [system properties](#system-properties) under **License Scanner → Administration → Properties**. The defaults match 1.0.0: a 30-day lookback and `admin` users left out.
+- Subscriptions where roles were added to *Associated roles* by hand keep them. Saving a new *Application entitlement* recalculates the roles from `license_role` and removes the hand-added ones.
+
+### Scan and verify
+
+Click **Scan license** on each active subscription, or wait for the weekly job. Then check:
+
+- every subscription has *Scan status* **Completed** and a *Scan message*,
+- **Scan History** has a record for each subscription,
+- the dashboard's **Overview** tab shows data. The **Trend** tab builds up one week at a time.
+
+### Why the numbers change
+
+Results from 1.1.0 differ from 1.0.0. These are the fixes at work, not errors:
+
+- Users whose *Web service access only* flag is empty are now included. 1.0.0 left them out.
+- A user is counted once per module, under the highest license they hold. 1.0.0 counted fulfillers again under Business Stakeholder.
+- Roles that come with a licensed role, such as `sn_incident_read` inside `sn_incident_write`, no longer count as a separate license.
+- Approvals only count within the lookback period. In 1.0.0 one old approval was enough.
+- Records opened in any workspace or in the classic UI now count. 1.0.0 only recognised Service Operations Workspace URLs.
+- Changes to comments, watch list and tags no longer make a user a Fulfiller.
+
+To compare before and after, export the License Monitor list before you upgrade.
+
+---
+
 ## Data model
 
 ### License Subscription (`x_delde_license_subscription`, prefix `LISUB`)
