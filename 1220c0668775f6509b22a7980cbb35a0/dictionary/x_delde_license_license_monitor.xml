@@ -1,21 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?><database>
     <element attributes="enforce_dot_walk_cross_scope_access=true" db_object_id="791438a887c73614d48e33750cbb3586" label="License Monitor" max_length="40" name="x_delde_license_license_monitor" type="collection">
+        <element attributes="edge_encryption_enabled=true" default="true" label="Latest" max_length="40" name="latest" read_only="true" read_only_option="instance_configured" type="boolean"/>
         <element attributes="edge_encryption_enabled=true,encode_utf8=false" label="Acting as" max_length="32" name="acting_as" reference="license_role_type" type="reference"/>
+        <element attributes="edge_encryption_enabled=true" label="Scan run" max_length="40" name="scan_run" read_only="true" read_only_option="instance_configured" type="string"/>
+        <element attributes="edge_encryption_enabled=true" label="Evidence" max_length="1000" name="evidence" read_only="true" read_only_option="instance_configured" type="string"/>
         <element attributes="edge_encryption_enabled=true,encode_utf8=false" label="Subscription" max_length="32" name="subscription" reference="x_delde_license_subscription" type="reference"/>
         <element attributes="edge_encryption_enabled=true,encode_utf8=false" label="User" max_length="32" name="user" reference="sys_user" type="reference"/>
         <element attributes="edge_encryption_enabled=true" choice="1" label="Status" max_length="40" name="status" type="string">
             <choice>
-                <element inactive_on_update="false" label="Error" sequence="400" value="Error"/>
                 <element inactive_on_update="false" label="Completed" sequence="200" value="Completed"/>
                 <element inactive_on_update="false" label="In progress" sequence="100" value="In progress"/>
+                <element inactive_on_update="false" label="Error" sequence="400" value="Error"/>
                 <element inactive_on_update="false" label="Skipped" sequence="300" value="Skipped"/>
             </choice>
         </element>
         <element attributes="ignore_filter_on_new=true" default="javascript:global.getNextObjNumberPadded();" label="Number" max_length="40" name="number" read_only="true" read_only_option="instance_configured" type="string"/>
         <element attributes="edge_encryption_enabled=true,encode_utf8=false" label="Role type" max_length="32" name="role_type" reference="license_role_type" type="reference"/>
-        <element attributes="edge_encryption_enabled=true" label="Evidence" max_length="1000" name="evidence" read_only="true" read_only_option="instance_configured" type="string"/>
-        <element attributes="edge_encryption_enabled=true" label="Scan run" max_length="40" name="scan_run" read_only="true" read_only_option="instance_configured" type="string"/>
-        <element attributes="edge_encryption_enabled=true" default="true" label="Latest" max_length="40" name="latest" read_only="true" read_only_option="instance_configured" type="boolean"/>
         <index name="index">
             <element name="acting_as"/>
         </index>
