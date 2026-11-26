@@ -4,7 +4,7 @@ This is shared for feedback and for people to try it out. It's possible to adapt
 
 License Scanner is an investigative app that can be used to explore user statistics that is not available in a ServiceNow instance normally. It compares the licenses users **hold** with how they **actually use** the platform.
 
-For each license definition it finds every user who has a licensed role. It then looks at what they did on the instance during the last 30 days and classifies each one as one of these:
+For each license definition it finds every user who has a licensed role. It then looks at what they did on the instance during the last 30 days (configurable) and classifies each one as one of these:
 
 | Acting as | Meaning |
 |---|---|
@@ -21,32 +21,48 @@ The results feed a dashboard. You can use it to find users who have more license
 ```
 .
 ├── README.md
-├── sys_remote_update_set_afe7d86d877c5b50d59c206e8bbb3508.xml   # The application (update set)
+├── license_scanner_update_set.xml        # The application as an update set (version 1.1.0)
+├── 1220c0668775f6509b22a7980cbb35a0/     # The application source, linked to ServiceNow Source Control
+├── sn_source_control.properties          # Tells ServiceNow where the application lives in this repo
 └── examples/
-    └── license_subscription_examples.xml                         # Example license subscriptions
+    └── license_subscription_examples.xml # Example license subscriptions
 ```
 
 ---
 
 ## Requirements
 
-- A ServiceNow instance with admin access, to install the update set.
-- The role **`usage_admin`**, which every table, list and module in the app requires. Give it to the people who will run the scanner.
+- A ServiceNow instance with admin access to install the application.
+- The role **`usage_admin`**, which the tables, lists and dashboard in the app require. Give it to the people who will run the scanner.
 - **Auditing switched on** for the tables you want to monitor. Most out-of-the-box task tables are audited by default. Check custom tables and non-task tables.
-- Navigator history (`sys_ui_navigator_history`) kept for at least the 30-day lookback.
+- Navigator history (`sys_ui_navigator_history`) kept for at least the lookback period.
+- The **Platform Analytics** dashboard experience, to use the included dashboard.
 
 ---
 
 ## Installation
 
+Choose one of the two options.
+
+### Option A: update set
+
 1. Go to **System Update Sets → Retrieved Update Sets**.
-2. Click **Import Update Set from XML** and upload `sys_remote_update_set_afe7d86d877c5b50d59c206e8bbb3508.xml`.
+2. Click **Import Update Set from XML** and upload `license_scanner_update_set.xml`.
 3. Open the retrieved update set and click **Preview Update Set**. Resolve any problems the preview finds.
 4. Click **Commit Update Set**.
-5. Give `usage_admin` to the users who will run the scanner.
-6. Create the license subscriptions (see [Configuring a license subscription](#configuring-a-license-subscription)) or import the examples.
 
-> **Note:** The dashboard is in the Global scope and is **not** part of the update set. Build it in Platform Analytics on the **License Monitor** table. Filter on *Subscription* and group by *Acting as*.
+### Option B: source control
+
+1. Open **ServiceNow Studio** and choose **Import from source control**.
+2. Enter this repository's URL and pick the `main` branch. A public repository needs no credential for importing.
+
+### After installing
+
+1. Give `usage_admin` to the users who will run the scanner.
+2. Create the license subscriptions (see [Configuring a license subscription](#configuring-a-license-subscription)) or import the examples.
+3. Review the [system properties](#system-properties).
+
+The dashboard is included and opens from **License Scanner → Dashboard**.
 
 ---
 
@@ -59,20 +75,21 @@ Each record is one license definition to monitor.
 | Field | Type | Description |
 |---|---|---|
 | Name | String | Name of the license definition. |
-| Role type | Reference → `license_role_type` | The license type being measured: *Fulfiller* or *Business Stakeholder*. |
+| Role type | Reference → `license_role_type` | The license type being measured, for example *Fulfiller* or *Business Stakeholder*. |
 | Application entitlement | List → `license_family` | The license families that make up the license. |
-| Associated roles | String | Licensed roles, filled in from *Application entitlement* and *Role type*. |
+| Associated roles | String | Licensed roles, filled in from *Application entitlement* and *Role type*. Kept as they are if no roles are found in `license_role`. |
 | Associated tables | List → `sys_db_object` | Tables whose activity counts as using the license. |
 | Table names | String | Table names, filled in from *Associated tables*. |
 | Subscription entitlement | Reference | Optional link to the platform subscription record. |
 | Scan status | Choice | 100 Not Initiated · 200 Initiated · 300 In Progress · 400 Skipped · 500 Completed · 600 Error |
+| Scan message | String | Result of the last scan (counts per classification) or the error that stopped it. |
 | Last scanned | Date/time | When the last scan finished. |
 | Active | True/False | Only active subscriptions are scanned by the scheduled job. |
 | Description | HTML | The rules used to classify users. |
 
 ### License Monitor (`x_delde_license_license_monitor`, prefix `LMON`)
 
-Each record is one user in one subscription.
+Each record is one user in one scan of one subscription.
 
 | Field | Description |
 |---|---|
@@ -80,27 +97,49 @@ Each record is one user in one subscription.
 | User | The user who holds one or more of the associated roles. |
 | Role type | The license type the user holds. |
 | Acting as | How the user actually behaves: Fulfiller, Business Stakeholder or Requester. |
-| Status | Status of the record. |
+| Evidence | Why the user got that classification, for example *Updated incident INC0007002 owned by someone else*. |
+| Scan run | Identifies the scan the record belongs to. |
+| Latest | True for the records that count now. The dashboard shows only these. |
+| Status | *Completed*, or *Skipped* when the user is counted under another subscription in the same module. |
 
 ---
 
 ## How a scan works
 
-1. **Configure.** When you set *Application entitlement* and *Role type* on a subscription, a business rule looks up the licensed roles in `license_role` and stores them in *Associated roles*. When you set *Associated tables*, another business rule stores the table names in *Table names*.
-2. **Start.** A scan starts in one of two ways:
-   - the **Scan license** UI action on the subscription form, or
-   - the scheduled job, which runs weekly on Monday at 00:00 for every active subscription.
+1. **Configure.** When you set *Application entitlement* and *Role type*, a business rule looks up the licensed roles in `license_role` and stores them in *Associated roles*. When you set *Associated tables*, another business rule stores the table names in *Table names*.
+2. **Start.** A scan starts from the **Scan license** UI action or from the scheduled job (weekly, Monday 00:00, every active subscription). Both set *Scan status* to **Initiated (200)**. The scheduled job first resets scans that have been *In Progress* for too long.
+3. **Find users.** `ScannerUtils.runScan()` sets **In Progress (300)** and finds active, interactive users who hold the associated roles, leaving out users with an excluded role (`admin` by default).
+4. **Classify.** Each user is checked in this order, within the lookback period, and the first match wins:
+   - **Fulfiller:** changed (`sys_audit`) a record in the associated tables that belongs to someone else. A record belongs to the person in *Caller*, *Requested for*, *Opened for*, *Contact*, *Consumer* or *Requested by*, or to its creator when none of those is filled in. Changes to the fields in `x_delde_license.ignored_audit_fields` (comments, watch list and tags by default) are ignored.
+   - **Business Stakeholder:** approved or rejected something, or opened a record in the associated tables that belongs to someone else (classic UI and any workspace URL).
+   - **Requester:** none of the above.
 
-   Both set *Scan status* to **Initiated (200)**.
-3. **Scan.** An async business rule sets the status to **In Progress (300)** and calls `ScannerUtils.processScan()`, which:
-   - finds active, interactive users who are granted the associated roles directly,
-   - leaves out users with `admin`,
-   - deletes the previous monitor records for the subscription,
-   - creates one monitor record per user and sets the subscription to **Completed (500)**.
-4. **Classify.** When each monitor record is inserted, the business rule *Check users Acting as status* calls `ScannerUtils.isActingAsFulfiller()`. It works out the user's *Acting as* value from:
-   - `sys_audit`: writes in the associated tables, within the last 30 days, on records created by someone else (gives **Fulfiller**),
-   - `sysapproval_approver`: approvals (gives **Business Stakeholder**),
-   - `sys_ui_navigator_history`: records the user opened that were created by someone else (gives **Business Stakeholder**).
+   Every subscription runs every check, so a Business Stakeholder who works as a Fulfiller is found.
+5. **Store.** One monitor record per user is created with the evidence. Earlier results are kept as history (*Latest* = false) and deleted after the retention period.
+6. **One classification per module.** See below.
+7. **Finish.** The subscription gets **Completed (500)** and a summary in *Scan message*. If anything fails it gets **Error (600)** with the error.
+
+### One classification per user per module
+
+A user who holds a Fulfiller role almost always holds Business Stakeholder roles too: in ITSM, `sn_incident_write` contains `sn_incident_read`, and the same pattern exists for change, problem and request, and in CSM and IRM. Without a rule, the same person would be counted against both licenses, although they consume only the higher one.
+
+Subscriptions that share at least one associated table are treated as the same module. Within a module each user is counted **once**:
+
+- in the subscription with the **highest license type** they hold (Fulfiller, then Business Stakeholder or Approver, then Requester),
+- with the **highest behaviour** seen in any of the module's subscriptions.
+
+The user's records in the other subscriptions get *Status* = *Skipped*, *Latest* = false, and evidence such as *Counted under LISUB0001002 (higher license in the same module)*. A user who holds licenses in two different modules, with no shared tables, is still counted in both.
+
+### System properties
+
+| Property | Default | Meaning |
+|---|---|---|
+| `x_delde_license.lookback_days` | 30 | Days of activity the scanner looks at. |
+| `x_delde_license.excluded_roles` | admin | Users with any of these roles are left out. |
+| `x_delde_license.include_inherited_roles` | false | Also count users who get a licensed role through another role. |
+| `x_delde_license.ignored_audit_fields` | comments,watch_list,sys_tags | Audited fields that do not count as fulfilling work. |
+| `x_delde_license.history_retention_days` | 365 | How long earlier scan results are kept. 0 keeps them forever. |
+| `x_delde_license.stuck_scan_hours` | 6 | After this many hours *In Progress*, the scheduled job sets the scan to *Error* so it can run again. |
 
 ---
 
@@ -109,7 +148,7 @@ Each record is one user in one subscription.
 1. Go to **License Scanner → License Subscriptions → New**.
 2. Fill in **Name**, **Role type**, **Application entitlement** (the license families) and **Associated tables**.
 3. Save. Check that *Associated roles* and *Table names* have been filled in.
-4. Tick **Active** and click **Scan license**.
+4. Tick **Active** and click **Scan license**. The result is shown in *Scan message* when the scan finishes.
 
 ### Example subscriptions
 
@@ -136,25 +175,17 @@ To import them, open the **License Subscription** list, right-click a column hea
 
 ## Known limitations
 
-- **Business Stakeholder subscriptions never detect Fulfiller behaviour.** If the subscription name contains "Stakeholder", the audit check is skipped.
-- **Approvals have no date limit.** One old approval is enough to make a user a Business Stakeholder.
-- **No history is kept.** Every scan deletes the previous results for the subscription, so trends over time are not available.
-- **A failed scan can stay *In Progress* (300) forever.** Neither the UI action nor the scheduled job picks it up again until someone resets the status by hand.
-- **Only Service Operations Workspace URLs are understood.** Records opened in other workspaces are not counted.
-- **Inherited roles are ignored.** Users who get a licensed role only through another role are not counted.
-- **Admins are always left out** of the scan.
-- **Monitor *Status* stays *In progress*.** It is never set to *Completed*.
-- **The 30-day lookback is hardcoded** in `ScannerUtils`.
+- **Modules are found from shared tables.** Two subscriptions with no table in common are treated as separate modules, even if they cover the same license.
+- **Approvals are not limited to the associated tables.** Any approval in the lookback period counts towards Business Stakeholder.
+- **The Business Stakeholder checks for approvals and views have only been tested with little data.** The Fulfiller path has been verified on a test instance.
 - **Cross-scope privileges** cover only some of the monitored tables. The app depends on *runtime access tracking* being set to *permissive*.
+- **The example subscriptions hold sys_ids from the instance they were built on.** See the note under [Example subscriptions](#example-subscriptions).
 
 ---
 
 ## Roadmap
 
-- Keep a history of scan runs so trends can be shown.
-- Add error handling that sets status *Error (600)*, and reset scans that are stuck.
-- Run the Fulfiller check for every subscription type, and limit approvals to the scan window.
-- Make the lookback period, excluded roles and workspace URL patterns configurable through system properties.
-- Move the dashboard into the application scope.
 - Add ATF tests for the classification logic.
 - Show the potential saving per subscription, based on the license price.
+- Limit approvals to records in the associated tables.
+- Add an explicit *Module* field as an alternative to grouping by shared tables.
