@@ -41,6 +41,7 @@ ScannerUtils.prototype = {
         this.lookbackDays = this._intProperty('lookback_days', 30);
         this.excludedRoles = gs.getProperty(this.PROPERTY_PREFIX + 'excluded_roles', 'admin');
         this.includeInheritedRoles = gs.getProperty(this.PROPERTY_PREFIX + 'include_inherited_roles', 'false') == 'true';
+        this.checkFulfillerBelowFulfiller = gs.getProperty(this.PROPERTY_PREFIX + 'check_fulfiller_below_fulfiller', 'false') == 'true';
         this.ignoredAuditFields = this._listProperty('ignored_audit_fields', 'comments,watch_list,sys_tags');
         this.historyRetentionDays = this._intProperty('history_retention_days', 365);
 
@@ -72,7 +73,10 @@ ScannerUtils.prototype = {
             var users = this.subscribedUsers(sub.getValue('associated_roles'));
             users = this._nonExcludedUsers(users, this.excludedRoles);
 
-            var classification = this.classifyUsers(users, tables);
+            // Below Fulfiller level the roles are read-only and ACLs stop fulfilling work, so the audit check is skipped
+            var checkFulfiller = this.checkFulfillerBelowFulfiller ||
+                (this.RANK[sub.getDisplayValue('role_type')] || 0) >= this.RANK.Fulfiller;
+            var classification = this.classifyUsers(users, tables, { checkFulfiller: checkFulfiller });
             var summary = this.populateLicenseMonitor(sub, users, classification, runId);
             this._retirePreviousRuns(sub.getUniqueValue(), runId);
             var group = this.reconcileModule(sub.getUniqueValue());
@@ -167,9 +171,10 @@ ScannerUtils.prototype = {
      * Order of evidence: writes on others' records -> approvals -> views of others' records.
      * @param users {Array} user sys_ids
      * @param tables {Array} table names
+     * @param options {object} optional: checkFulfiller (default true)
      * @return {object} userSysId -> {actingAs: string, evidence: string}
      */
-    classifyUsers: function(users, tables) {
+    classifyUsers: function(users, tables, options) {
         var result = {};
         if (!users.length) return result;
 
@@ -177,7 +182,8 @@ ScannerUtils.prototype = {
         var byName = {};
         Object.keys(userNames).forEach(function(id) { byName[userNames[id]] = id; });
 
-        var fulfillers = this._fulfillerEvidence(users, userNames, byName, tables);
+        var checkFulfiller = !options || options.checkFulfiller !== false;
+        var fulfillers = checkFulfiller ? this._fulfillerEvidence(users, userNames, byName, tables) : {};
         var remaining = users.filter(function(u) { return !fulfillers[u]; });
         var approvers = this._approvalEvidence(remaining);
         remaining = remaining.filter(function(u) { return !approvers[u]; });

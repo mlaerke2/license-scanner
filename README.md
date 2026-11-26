@@ -114,7 +114,7 @@ Each record is one user in one scan of one subscription.
    - **Business Stakeholder:** approved or rejected something, or opened a record in the associated tables that belongs to someone else (classic UI and any workspace URL).
    - **Requester:** none of the above.
 
-   Every subscription runs every check, so a Business Stakeholder who works as a Fulfiller is found.
+   The Fulfiller check runs only for subscriptions at Fulfiller level. Business Stakeholder roles are read-only, and ACLs stop those users from doing fulfilling work, so their subscriptions classify users as Business Stakeholder or Requester. Set `x_delde_license.check_fulfiller_below_fulfiller` to true to run the check anyway, for example to test for gaps in custom ACLs.
 5. **Store.** One monitor record per user is created with the evidence. Earlier results are kept as history (*Latest* = false) and deleted after the retention period.
 6. **One classification per module.** See below.
 7. **Finish.** The subscription gets **Completed (500)** and a summary in *Scan message*. If anything fails it gets **Error (600)** with the error.
@@ -137,6 +137,7 @@ The user's records in the other subscriptions get *Status* = *Skipped*, *Latest*
 | `x_delde_license.lookback_days` | 30 | Days of activity the scanner looks at. |
 | `x_delde_license.excluded_roles` | admin | Users with any of these roles are left out. |
 | `x_delde_license.include_inherited_roles` | false | Also count users who get a licensed role through another role. |
+| `x_delde_license.check_fulfiller_below_fulfiller` | false | Also look for Fulfiller activity in subscriptions below Fulfiller level. Useful to test for ACL gaps. |
 | `x_delde_license.ignored_audit_fields` | comments,watch_list,sys_tags | Audited fields that do not count as fulfilling work. |
 | `x_delde_license.history_retention_days` | 365 | How long earlier scan results are kept. 0 keeps them forever. |
 | `x_delde_license.stuck_scan_hours` | 6 | After this many hours *In Progress*, the scheduled job sets the scan to *Error* so it can run again. |
