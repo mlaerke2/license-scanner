@@ -81,6 +81,18 @@ The **Trend** tab shows the weekly development from [Scan History](#scan-history
 | Users by behaviour over time | Fulfiller, Business Stakeholder and Requester across all subscriptions, per week. |
 | Unused licenses (Requester) per subscription | Users who hold a license but act as Requester, per subscription and week. |
 
+### Employee Center widget
+
+The app includes a portal page, `/esc?id=x_delde_license_usage`, with the **License usage** widget (`x-delde-license-usage`). It shows the same results as the dashboard in a form meant for license and process owners:
+
+- a module filter (modules are found the same way as in the scanner: subscriptions that share tables),
+- four key figures: licensed users, users at license level, possible downgrades (Fulfiller license, Business Stakeholder use) and licenses not used (Requester),
+- one stacked bar per subscription,
+- the weekly trend of unused licenses from Scan History,
+- the first users to review, with the scanner's evidence, and a link to the full list.
+
+Everything is read live from Scan History and License Monitor. The page and the widget's data require `usage_admin`. The widget is built for the Employee Center (`esc`) portal and moves clear of its left navigation rail. On another portal, add the widget to a page there.
+
 ### Menu
 
 | Module | Opens |
@@ -89,6 +101,7 @@ The **Trend** tab shows the weekly development from [Scan History](#scan-history
 | License Monitors | One record per user per scan. |
 | Scan History | One record per subscription per scan. |
 | Dashboard | The License Scanner dashboard. |
+| License usage (portal) | The license usage page on the Employee Center portal, in a new tab. |
 | Administration → Properties | The app's system properties (admin only). |
 | Administration → ScanUtils, Schedule Job, Business rule | The app's code (admin only). |
 

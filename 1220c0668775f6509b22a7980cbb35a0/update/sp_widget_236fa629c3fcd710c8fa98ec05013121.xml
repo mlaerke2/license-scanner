@@ -1,0 +1,520 @@
+<?xml version="1.0" encoding="UTF-8"?><record_update table="sp_widget"><sp_widget action="INSERT_OR_UPDATE"><category>custom</category><client_script><![CDATA[api.controller = function($scope, $element, $window, $timeout) {
+    /* License Scanner - License usage widget (client). All numbers come from c.data; this only filters and sums. */
+    var c = this;
+    var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    c.selected = 'all';
+    c.loading = false;
+
+    c.select = function(key) {
+        c.selected = key;
+        recompute();
+    };
+
+    c.refresh = function() {
+        c.loading = true;
+        c.server.get({ action: 'refresh' }).then(function(r) {
+            angular.extend(c.data, r.data);
+            c.loading = false;
+            recompute();
+        });
+    };
+
+    function shownModules() {
+        return (c.data.modules || []).filter(function(m) { return c.selected === 'all' || m.key === c.selected; });
+    }
+
+    function recompute() {
+        if (!c.data.allowed) return;
+        var mods = shownModules();
+        var rows = [], total = 0, atLevel = 0, downgrade = 0, notUsed = 0, reviewTotal = 0, subIds = [];
+        var weeks = c.data.weeks || [];
+        var series = weeks.map(function() { return null; });
+
+        mods.forEach(function(m) {
+            m.subs.forEach(function(s) {
+                var users = s.f + s.bs + s.r;
+                total += users;
+                atLevel += s.type === 'Fulfiller' ? s.f : s.bs;
+                if (s.type === 'Fulfiller') { downgrade += s.bs; reviewTotal += s.bs + s.r; }
+                notUsed += s.r;
+                subIds.push(s.id);
+                (s.req || []).forEach(function(v, i) { if (v !== null) series[i] = (series[i] || 0) + v; });
+                rows.push({
+                    module: m.label, name: s.name, type: s.type, scanned: s.scanned, users: users, r: s.r,
+                    isFulfiller: s.type === 'Fulfiller',
+                    fW: pct(s.f, users), bW: pct(s.bs, users), rW: pct(s.r, users),
+                    f: s.f, bs: s.bs,
+                    aria: s.name + ', ' + s.type + ': ' + s.f + ' Fulfiller, ' + s.bs + ' Business Stakeholder, ' + s.r + ' Requester'
+                });
+            });
+        });
+
+        c.kpi = {
+            total: total, atLevel: atLevel, atLevelPct: total ? Math.round(atLevel / total * 100) : 0,
+            downgrade: downgrade, notUsed: notUsed, reviewTotal: reviewTotal
+        };
+        c.rows = rows;
+        c.trend = buildTrend(series, weeks);
+        c.review = (c.data.review || []).filter(function(u) { return c.selected === 'all' || u.module === c.selected; }).slice(0, 5);
+        c.reviewLink = c.data.links.monitor + encodeURIComponent('latest=true^role_type=' + c.data.fulfillerId +
+            '^acting_as!=' + c.data.fulfillerId + (subIds.length ? '^subscriptionIN' + subIds.join(',') : ''));
+    }
+
+    function pct(n, of) { return of ? (n / of * 100).toFixed(2) + '%' : '0%'; }
+
+    function buildTrend(series, weeks) {
+        var idx = [], vals = [];
+        series.forEach(function(v, i) { if (v !== null) { idx.push(i); vals.push(v); } });
+        if (vals.length < 2) return { enough: false, last: vals.length ? vals[0] : 0 };
+        var max = Math.max.apply(null, vals), min = Math.min.apply(null, vals), span = Math.max(1, max - min);
+        var n = Math.max(1, weeks.length - 1);
+        var pts = vals.map(function(v, k) { return (idx[k] * 600 / n).toFixed(1) + ',' + (20 + (max - v) / span * 150).toFixed(1); });
+        var first = vals[0], last = vals[vals.length - 1], diff = last - first;
+        return {
+            enough: true, first: first, last: last,
+            change: diff === 0 ? 'No change' : (diff < 0 ? '−' : '+') + Math.abs(diff) + ' in ' + vals.length + ' weeks',
+            down: diff < 0,
+            line: pts.join(' '),
+            area: pts.join(' ') + ' ' + (idx[idx.length - 1] * 600 / n).toFixed(1) + ',170 ' + (idx[0] * 600 / n).toFixed(1) + ',170',
+            labels: [label(weeks[idx[0]]), label(weeks[Math.floor((idx[0] + idx[idx.length - 1]) / 2)]), label(weeks[idx[idx.length - 1]])],
+            aria: 'Unused licenses went from ' + first + ' to ' + last + ' over ' + vals.length + ' weeks'
+        };
+    }
+
+    function label(isoDate) {
+        if (!isoDate) return '';
+        var p = isoDate.split('-');
+        return parseInt(p[2], 10) + ' ' + MONTHS[parseInt(p[1], 10) - 1];
+    }
+
+    recompute();
+
+    /* Employee Center's left navigation rail is position:fixed and can cover the widget. Measure and move clear. */
+    var RAIL = '.parent-menu-container.main-container, .skeleton-loader-container.main-container';
+    var GAP = 16, observer = null, tries = 0, retry = null;
+    function clearRail() {
+        var root = $element[0].querySelector('.lsw-widget');
+        if (!root) return;
+        root.style.marginLeft = '';
+        var rail = $window.document.querySelector(RAIL);
+        if (!rail || !$window.document.body.classList.contains('left-nav-desktop')) return;
+        var overlap = rail.getBoundingClientRect().right - root.getBoundingClientRect().left;
+        if (overlap > 0) root.style.marginLeft = (overlap + GAP) + 'px';
+    }
+    function retryLoop() {
+        clearRail();
+        if (++tries < 10) retry = $timeout(retryLoop, 300);
+    }
+    $timeout(function() {
+        retryLoop();
+        var rail = $window.document.querySelector(RAIL);
+        if (rail && $window.ResizeObserver) { observer = new $window.ResizeObserver(clearRail); observer.observe(rail); }
+    });
+    angular.element($window).on('resize', clearRail);
+    $scope.$on('$destroy', function() {
+        angular.element($window).off('resize', clearRail);
+        if (observer) observer.disconnect();
+        if (retry) $timeout.cancel(retry);
+    });
+};
+]]></client_script><controller_as>c</controller_as><css>/* License Scanner - License usage widget. Every class is prefixed lsw-; no global rules. */
+.lsw-widget, .lsw-widget *, .lsw-widget *::before, .lsw-widget *::after { box-sizing: border-box; }
+
+.lsw-widget {
+  --lsw-ink: #1D2433;
+  --lsw-ink-2: #3A4459;
+  --lsw-muted: #555E70;
+  --lsw-line: #E2E5EB;
+  --lsw-line-2: #EEF0F4;
+  --lsw-surface: #F3F4F7;
+  --lsw-card: #FFFFFF;
+  --lsw-f: #1F4E99;
+  --lsw-bs: #7DB1EE;
+  --lsw-bs-text: #1D5FA8;
+  --lsw-req: #F0A048;
+  --lsw-req-text: #A65A0E;
+  --lsw-good: #1E7B45;
+  --lsw-radius: 12px;
+  font-family: 'Lato', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  color: var(--lsw-ink);
+  background: var(--lsw-surface);
+  padding: 32px 24px 48px;
+  border-radius: var(--lsw-radius);
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.lsw-widget &gt; div { display: flex; flex-direction: column; gap: 24px; }
+
+.lsw-h1 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.01em; color: var(--lsw-ink); }
+.lsw-h2 { margin: 0; font-size: 17px; font-weight: 700; color: var(--lsw-ink); }
+.lsw-muted { margin: 0; color: var(--lsw-muted); font-size: 14px; }
+.lsw-small { font-size: 13px; }
+.lsw-strong { font-weight: 700; }
+.lsw-c-bs { color: var(--lsw-bs-text); }
+.lsw-c-req { color: var(--lsw-req-text); }
+.lsw-good { color: var(--lsw-good); }
+
+.lsw-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.lsw-title { display: flex; flex-direction: column; gap: 6px; }
+.lsw-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+.lsw-link { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 700; color: var(--lsw-f); text-decoration: none; }
+.lsw-link:hover, .lsw-link:focus { color: #163A73; text-decoration: underline; }
+.lsw-btn-ghost { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border-radius: 22px; border: 1px solid #C9CFDB; background: var(--lsw-card); color: var(--lsw-ink); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.lsw-btn-ghost[disabled] { opacity: 0.6; cursor: default; }
+
+.lsw-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.lsw-pill { min-height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid #C9CFDB; background: var(--lsw-card); color: var(--lsw-ink); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.lsw-pill:hover { border-color: var(--lsw-ink-2); }
+.lsw-pill-on, .lsw-pill-on:hover { background: var(--lsw-ink); border-color: var(--lsw-ink); color: #FFFFFF; }
+.lsw-pill:focus-visible, .lsw-btn-ghost:focus-visible, .lsw-link:focus-visible { outline: 3px solid #7DB1EE; outline-offset: 2px; }
+
+.lsw-card { background: var(--lsw-card); border-radius: var(--lsw-radius); padding: 24px; box-shadow: 0 1px 2px rgba(29, 36, 51, 0.08); display: flex; flex-direction: column; gap: 16px; }
+.lsw-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+
+.lsw-kpis { display: flex; flex-wrap: wrap; gap: 16px; }
+.lsw-kpi { flex: 1 1 220px; padding: 20px; gap: 8px; }
+.lsw-kpi-label { margin: 0; font-size: 13px; font-weight: 700; color: var(--lsw-muted); }
+.lsw-kpi-n { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+.lsw-kpi-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
+.lsw-kpi-pct { font-size: 16px; font-weight: 700; color: var(--lsw-f); }
+.lsw-kpi-change { font-size: 14px; font-weight: 700; color: var(--lsw-muted); }
+
+.lsw-split { display: flex; flex-wrap: wrap; gap: 16px; align-items: stretch; }
+.lsw-bysub { flex: 999 1 560px; min-width: 0; }
+.lsw-trend { flex: 1 1 320px; min-width: 0; }
+
+.lsw-legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--lsw-ink-2); }
+.lsw-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.lsw-sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+.lsw-bg-f { background: var(--lsw-f); }
+.lsw-bg-bs { background: var(--lsw-bs); }
+.lsw-bg-req { background: var(--lsw-req); }
+
+.lsw-rows { display: flex; flex-direction: column; gap: 16px; }
+.lsw-row { display: flex; flex-direction: column; gap: 8px; }
+.lsw-row-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.lsw-row-name { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; font-size: 14px; }
+.lsw-badge { font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 10px; white-space: nowrap; }
+.lsw-badge-f { background: #E6EEF9; color: var(--lsw-f); }
+.lsw-badge-bs { background: #EAF3FD; color: var(--lsw-bs-text); }
+.lsw-bar { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; background: #EDEFF3; }
+.lsw-seg { height: 100%; }
+
+.lsw-trend-n { font-size: 30px; font-weight: 700; }
+.lsw-chart { display: block; width: 100%; height: 180px; margin-top: 12px; }
+.lsw-axis { stroke: var(--lsw-line); stroke-width: 1; }
+.lsw-grid { stroke: var(--lsw-line-2); stroke-width: 1; }
+.lsw-area { fill: var(--lsw-req); fill-opacity: 0.16; }
+.lsw-line { fill: none; stroke: #D07A1F; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round; }
+.lsw-axis-labels { display: flex; justify-content: space-between; font-size: 12px; color: var(--lsw-muted); }
+
+.lsw-table-wrap { overflow-x: auto; }
+.lsw-table { width: 100%; min-width: 720px; border-collapse: collapse; font-size: 14px; }
+.lsw-table th { text-align: left; padding: 10px 12px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--lsw-muted); border-bottom: 1px solid var(--lsw-line); }
+.lsw-table td { padding: 12px; border-bottom: 1px solid var(--lsw-line-2); color: var(--lsw-ink-2); vertical-align: top; }
+.lsw-act { display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 12px; white-space: nowrap; }
+.lsw-act-req { background: #FDF0E1; color: #8F4C0A; }
+.lsw-act-bs { background: #EAF3FD; color: var(--lsw-bs-text); }
+
+.lsw-denied { display: flex; flex-direction: column; gap: 8px; padding: 24px; background: var(--lsw-card); border-radius: var(--lsw-radius); }
+
+@media (max-width: 600px) {
+  .lsw-widget { padding: 20px 12px 32px; }
+  .lsw-h1 { font-size: 24px; }
+  .lsw-kpi-n { font-size: 28px; }
+}
+</css><data_table>sp_instance</data_table><demo_data/><description>License Scanner: license usage per module, unused licenses trend and users to review. Requires usage_admin.</description><docs/><field_list/><has_preview>false</has_preview><id>x-delde-license-usage</id><internal>false</internal><link><![CDATA[function link(scope, element, attrs, controller) {  }]]></link><name>License usage</name><option_schema/><public>false</public><roles/><script><![CDATA[(function() {
+    /* License Scanner - License usage widget (server, ES5).
+       Builds plain JSON from Scan History and License Monitor. All numbers are counted here. */
+    var FULFILLER = '1783b4032323001004402d0d96bf65e1';   // license_role_type Fulfiller, same sys_id on every instance
+    var RANK = { 'Fulfiller': 3, 'Business Stakeholder': 2, 'Approver': 2, 'Requester': 1 };
+    var WEEKS = 12;
+
+    data.allowed = gs.hasRole('usage_admin');
+    if (!data.allowed) return;
+
+    var built = buildData();
+    for (var k in built) data[k] = built[k];
+    return;
+
+    function buildData() {
+        var out = {};
+
+        // 1. Active subscriptions with their tables
+        var subs = [], byId = {};
+        var s = new GlideRecord('x_delde_license_subscription');
+        s.addActiveQuery();
+        s.orderBy('number');
+        s.query();
+        var lastScanned = '';
+        while (s.next()) {
+            var tables = {};
+            (s.getValue('table_names') || '').split(',').forEach(function(t) { t = t.trim(); if (t) tables[t] = true; });
+            var type = s.getDisplayValue('role_type') || '';
+            var rec = { id: s.getUniqueValue(), number: s.getValue('number'), name: s.getValue('name'), type: type,
+                rank: RANK[type] || 0, tables: tables, scanned: false, f: 0, bs: 0, r: 0, elsewhere: 0, req: [] };
+            subs.push(rec); byId[rec.id] = rec;
+            var ls = s.getValue('last_scanned');
+            if (ls && ls > lastScanned) lastScanned = ls;
+        }
+
+        // 2. Modules: subscriptions that share at least one table (same rule as the scanner)
+        var moduleOf = {}, modules = [];
+        subs.forEach(function(start) {
+            if (moduleOf[start.id]) return;
+            var key = 'm' + modules.length, group = [start], queue = [start];
+            moduleOf[start.id] = key;
+            while (queue.length) {
+                var cur = queue.shift();
+                subs.forEach(function(o) {
+                    if (moduleOf[o.id]) return;
+                    for (var t in cur.tables) {
+                        if (o.tables[t]) { moduleOf[o.id] = key; group.push(o); queue.push(o); break; }
+                    }
+                });
+            }
+            group.sort(function(a, b) { return (b.rank - a.rank) || (a.number < b.number ? -1 : 1); });
+            modules.push({ key: key, label: moduleLabel(group), subs: group });
+        });
+
+        // 3. Latest counts per subscription from Scan History
+        var h = new GlideRecord('x_delde_license_scan_history');
+        h.addQuery('subscription', 'IN', Object.keys(byId).join(','));
+        h.orderByDesc('scanned_on');
+        h.query();
+        var seen = {};
+        while (h.next()) {
+            var sid = h.getValue('subscription');
+            if (seen[sid]) continue;
+            seen[sid] = true;
+            var sub = byId[sid];
+            sub.scanned = true;
+            sub.f = toInt(h.getValue('fulfiller'));
+            sub.bs = toInt(h.getValue('business_stakeholder'));
+            sub.r = toInt(h.getValue('requester'));
+            sub.elsewhere = toInt(h.getValue('counted_elsewhere'));
+        }
+
+        // 4. Weekly Requester trend (newest run per week), carried forward over missing weeks
+        var weeks = weekStarts(WEEKS);
+        var from = new GlideDateTime(weeks[0] + ' 00:00:00');
+        var t = new GlideRecord('x_delde_license_scan_history');
+        t.addQuery('subscription', 'IN', Object.keys(byId).join(','));
+        t.addQuery('period_latest', true);
+        t.addQuery('scanned_on', '>=', from);
+        t.orderBy('scanned_on');
+        t.query();
+        var perWeek = {};   // sid -> week -> requester
+        while (t.next()) {
+            var wk = weekOf(new GlideDateTime(t.getValue('scanned_on')));
+            var id = t.getValue('subscription');
+            (perWeek[id] = perWeek[id] || {})[wk] = toInt(t.getValue('requester'));
+        }
+        subs.forEach(function(sub) {
+            var last = null, series = [];
+            weeks.forEach(function(w) {
+                if (perWeek[sub.id] && perWeek[sub.id][w] !== undefined) last = perWeek[sub.id][w];
+                series.push(last);
+            });
+            sub.req = series;
+        });
+
+        // 5. Users to review: Fulfiller license, not acting as Fulfiller
+        var review = [];
+        var m = new GlideRecord('x_delde_license_license_monitor');
+        m.addQuery('latest', true);
+        m.addQuery('role_type', FULFILLER);
+        m.addQuery('acting_as', '!=', FULFILLER);
+        m.addQuery('subscription', 'IN', Object.keys(byId).join(','));
+        m.orderBy('acting_as');
+        m.orderBy('user.name');
+        m.setLimit(500);
+        m.query();
+        while (m.next()) {
+            var subId = m.getValue('subscription');
+            review.push({ user: m.getDisplayValue('user'), sub: subId, subName: byId[subId] ? byId[subId].name : '',
+                module: moduleOf[subId], acting: m.getDisplayValue('acting_as'), evidence: m.getValue('evidence') || '' });
+        }
+
+        out.modules = modules.map(function(mod) {
+            return { key: mod.key, label: mod.label, subs: mod.subs.map(function(x) {
+                return { id: x.id, name: x.name, type: x.type, scanned: x.scanned,
+                    f: x.f, bs: x.bs, r: x.r, elsewhere: x.elsewhere, req: x.req };
+            }) };
+        });
+        out.modules.sort(function(a, b) { return total(b) - total(a); });
+        out.weeks = weeks;
+        out.review = review;
+        out.subscriptionCount = subs.length;
+        out.lastScanned = lastScanned ? new GlideDateTime(lastScanned).getDisplayValue() : '';
+        out.lookbackDays = gs.getProperty('x_delde_license.lookback_days', '30');
+        out.links = {
+            dashboard: '/now/platform-analytics-workspace/dashboards/params/edit/false/sys-id/6a774bc9878b36149b22a7980cbb3505',
+            monitor: '/x_delde_license_license_monitor_list.do?sysparm_query='
+        };
+        out.fulfillerId = FULFILLER;
+        return out;
+    }
+
+    function moduleLabel(group) {
+        // Label from the highest-ranked subscription, without its license-type suffix
+        var n = group[0].name || '';
+        return n.replace(/\s*-\s*(Fulfiller|Business Stakeholder)\s*$/i, '') || n;
+    }
+    function total(mod) {
+        var n = 0;
+        mod.subs.forEach(function(x) { n += x.f + x.bs + x.r; });
+        return n;
+    }
+    function toInt(v) { var n = parseInt(v, 10); return isNaN(n) ? 0 : n; }
+    function weekOf(gdt) {
+        var d = new GlideDateTime(gdt);
+        d.addDaysUTC(1 - d.getDayOfWeekUTC());   // back to Monday
+        return d.getValue().substring(0, 10);
+    }
+    function weekStarts(n) {
+        var cur = weekOf(new GlideDateTime()), out = [];
+        var d = new GlideDateTime(cur + ' 00:00:00');
+        d.addDaysUTC(-7 * (n - 1));
+        for (var i = 0; i < n; i++) { out.push(d.getValue().substring(0, 10)); d.addDaysUTC(7); }
+        return out;
+    }
+})();
+]]></script><servicenow>false</servicenow><sys_class_name>sp_widget</sys_class_name><sys_created_by>malimooti.cadmin</sys_created_by><sys_created_on>2026-11-26 20:47:53</sys_created_on><sys_id>236fa629c3fcd710c8fa98ec05013121</sys_id><sys_mod_count>1</sys_mod_count><sys_name>License usage</sys_name><sys_package display_value="License Scanner" source="x_delde_license">1220c0668775f6509b22a7980cbb35a0</sys_package><sys_policy/><sys_scope display_value="License Scanner">1220c0668775f6509b22a7980cbb35a0</sys_scope><sys_update_name>sp_widget_236fa629c3fcd710c8fa98ec05013121</sys_update_name><sys_updated_by>malimooti.cadmin</sys_updated_by><sys_updated_on>2026-11-26 20:48:36</sys_updated_on><template><![CDATA[<div class="lsw-widget">
+
+  <div class="lsw-denied" ng-if="!c.data.allowed">
+    <h2 class="lsw-h2">License usage</h2>
+    <p class="lsw-muted">You need the usage_admin role to see license usage.</p>
+  </div>
+
+  <div ng-if="c.data.allowed">
+    <div class="lsw-head">
+      <div class="lsw-title">
+        <h1 class="lsw-h1">License usage</h1>
+        <p class="lsw-muted">
+          <span ng-if="c.data.lastScanned">Latest scan {{c.data.lastScanned}} · </span>{{c.data.subscriptionCount}} license subscriptions · activity in the last {{c.data.lookbackDays}} days
+        </p>
+      </div>
+      <div class="lsw-actions">
+        <button type="button" class="lsw-btn-ghost" ng-click="c.refresh()" ng-disabled="c.loading" aria-label="Refresh">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 4v5h-5"></path></svg>
+          <span>{{c.loading ? 'Refreshing' : 'Refresh'}}</span>
+        </button>
+        <a class="lsw-link" ng-href="{{c.data.links.dashboard}}" target="_blank" rel="noopener">Open full dashboard
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg>
+        </a>
+      </div>
+    </div>
+
+    <div class="lsw-filters" role="group" aria-label="Module">
+      <button type="button" class="lsw-pill" ng-class="{'lsw-pill-on': c.selected === 'all'}" aria-pressed="{{c.selected === 'all'}}" ng-click="c.select('all')">All modules</button>
+      <button type="button" class="lsw-pill" ng-repeat="m in c.data.modules" ng-class="{'lsw-pill-on': c.selected === m.key}" aria-pressed="{{c.selected === m.key}}" ng-click="c.select(m.key)">{{m.label}}</button>
+    </div>
+
+    <div class="lsw-kpis">
+      <section class="lsw-card lsw-kpi">
+        <h2 class="lsw-kpi-label">Licensed users</h2>
+        <div class="lsw-kpi-n">{{c.kpi.total | number}}</div>
+        <p class="lsw-muted lsw-small">Counted once per module</p>
+      </section>
+      <section class="lsw-card lsw-kpi">
+        <h2 class="lsw-kpi-label">Used at license level</h2>
+        <div class="lsw-kpi-row"><span class="lsw-kpi-n">{{c.kpi.atLevel | number}}</span><span class="lsw-kpi-pct">{{c.kpi.atLevelPct}}%</span></div>
+        <p class="lsw-muted lsw-small">Act as the license they hold</p>
+      </section>
+      <section class="lsw-card lsw-kpi">
+        <h2 class="lsw-kpi-label">Possible downgrades</h2>
+        <div class="lsw-kpi-n lsw-c-bs">{{c.kpi.downgrade | number}}</div>
+        <p class="lsw-muted lsw-small">Fulfiller license, Business Stakeholder use</p>
+      </section>
+      <section class="lsw-card lsw-kpi">
+        <h2 class="lsw-kpi-label">Not used</h2>
+        <div class="lsw-kpi-row">
+          <span class="lsw-kpi-n lsw-c-req">{{c.kpi.notUsed | number}}</span>
+          <span class="lsw-kpi-change" ng-if="c.trend.enough" ng-class="{'lsw-good': c.trend.down}">{{c.trend.change}}</span>
+        </div>
+        <p class="lsw-muted lsw-small">Hold a license, act as Requester</p>
+      </section>
+    </div>
+
+    <div class="lsw-split">
+      <section class="lsw-card lsw-bysub" aria-labelledby="lsw-bysub-h">
+        <div class="lsw-card-head">
+          <h2 class="lsw-h2" id="lsw-bysub-h">By subscription</h2>
+          <div class="lsw-legend">
+            <span><i class="lsw-sw lsw-bg-f"></i>Fulfiller</span>
+            <span><i class="lsw-sw lsw-bg-bs"></i>Business Stakeholder</span>
+            <span><i class="lsw-sw lsw-bg-req"></i>Requester</span>
+          </div>
+        </div>
+        <div class="lsw-rows">
+          <div class="lsw-row" ng-repeat="row in c.rows">
+            <div class="lsw-row-top">
+              <div class="lsw-row-name">
+                <span class="lsw-strong" title="{{row.name}}">{{row.module}}</span>
+                <span class="lsw-badge" ng-class="row.isFulfiller ? 'lsw-badge-f' : 'lsw-badge-bs'">{{row.type}}</span>
+              </div>
+              <span class="lsw-muted lsw-small" ng-if="row.scanned">{{row.users | number}} users · <strong class="lsw-c-req">{{row.r | number}} not used</strong></span>
+              <span class="lsw-muted lsw-small" ng-if="!row.scanned">Not scanned yet</span>
+            </div>
+            <div class="lsw-bar" role="img" aria-label="{{row.aria}}">
+              <div class="lsw-seg lsw-bg-f" ng-if="row.f" ng-style="{width: row.fW}"></div>
+              <div class="lsw-seg lsw-bg-bs" ng-if="row.bs" ng-style="{width: row.bW}"></div>
+              <div class="lsw-seg lsw-bg-req" ng-if="row.r" ng-style="{width: row.rW}"></div>
+            </div>
+          </div>
+          <p class="lsw-muted" ng-if="!c.rows.length">No active license subscriptions.</p>
+        </div>
+      </section>
+
+      <section class="lsw-card lsw-trend" aria-labelledby="lsw-trend-h">
+        <div>
+          <h2 class="lsw-h2" id="lsw-trend-h">Unused licenses</h2>
+          <p class="lsw-muted lsw-small">Users acting as Requester, last {{c.data.weeks.length}} weeks</p>
+        </div>
+        <div ng-if="c.trend.enough">
+          <div class="lsw-kpi-row">
+            <span class="lsw-trend-n lsw-c-req">{{c.trend.last | number}}</span>
+            <span class="lsw-muted">from {{c.trend.first | number}} on {{c.trend.labels[0]}}</span>
+          </div>
+          <svg class="lsw-chart" viewBox="0 0 600 180" preserveAspectRatio="none" role="img" aria-label="{{c.trend.aria}}">
+            <line x1="0" y1="170" x2="600" y2="170" class="lsw-axis" vector-effect="non-scaling-stroke"></line>
+            <line x1="0" y1="95" x2="600" y2="95" class="lsw-grid" vector-effect="non-scaling-stroke"></line>
+            <line x1="0" y1="20" x2="600" y2="20" class="lsw-grid" vector-effect="non-scaling-stroke"></line>
+            <polygon ng-attr-points="{{c.trend.area}}" class="lsw-area"></polygon>
+            <polyline ng-attr-points="{{c.trend.line}}" class="lsw-line" vector-effect="non-scaling-stroke"></polyline>
+          </svg>
+          <div class="lsw-axis-labels"><span ng-repeat="l in c.trend.labels track by $index">{{l}}</span></div>
+        </div>
+        <p class="lsw-muted" ng-if="!c.trend.enough">The trend appears after scans in two different weeks.</p>
+      </section>
+    </div>
+
+    <section class="lsw-card" aria-labelledby="lsw-review-h">
+      <div class="lsw-card-head">
+        <div>
+          <h2 class="lsw-h2" id="lsw-review-h">Users to review</h2>
+          <p class="lsw-muted lsw-small">Hold a Fulfiller license but did not fulfil anything in the last {{c.data.lookbackDays}} days</p>
+        </div>
+        <a class="lsw-link" ng-if="c.kpi.reviewTotal" ng-href="{{c.reviewLink}}" target="_blank" rel="noopener">View all {{c.kpi.reviewTotal | number}}</a>
+      </div>
+      <div class="lsw-table-wrap" ng-if="c.review.length">
+        <table class="lsw-table">
+          <thead>
+            <tr><th scope="col">User</th><th scope="col">Subscription</th><th scope="col">Acting as</th><th scope="col">Evidence</th></tr>
+          </thead>
+          <tbody>
+            <tr ng-repeat="u in c.review">
+              <td class="lsw-strong">{{u.user}}</td>
+              <td>{{u.subName}}</td>
+              <td><span class="lsw-act" ng-class="u.acting === 'Requester' ? 'lsw-act-req' : 'lsw-act-bs'">{{u.acting}}</span></td>
+              <td class="lsw-muted">{{u.evidence}}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="lsw-muted" ng-if="!c.review.length">Nobody to review in this selection.</p>
+    </section>
+  </div>
+</div>
+]]></template></sp_widget></record_update>
