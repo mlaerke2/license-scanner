@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?><record_update sys_domain="global" table="sys_app_module">
+    <sys_app_module action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <application display_value="License scanner">1c7740e287b5f6509b22a7980cbb35b2</application>
+        <assessment/>
+        <device_type/>
+        <filter/>
+        <hint/>
+        <homepage/>
+        <image/>
+        <karuna_route/>
+        <link_type>LIST</link_type>
+        <map_page/>
+        <mobile_title>License Monitors</mobile_title>
+        <mobile_view_name>Mobile</mobile_view_name>
+        <name>x_delde_license_license_monitor</name>
+        <order>200</order>
+        <override_menu_roles>false</override_menu_roles>
+        <query/>
+        <report/>
+        <require_confirmation>true</require_confirmation>
+        <roles>usage_admin</roles>
+        <route/>
+        <screen/>
+        <sys_class_name>sys_app_module</sys_class_name>
+        <sys_created_by>pchhantyal</sys_created_by>
+        <sys_created_on>2026-02-10 13:16:21</sys_created_on>
+        <sys_domain>global</sys_domain>
+        <sys_domain_path>/</sys_domain_path>
+        <sys_id>d394b42c87c73614d48e33750cbb350f</sys_id>
+        <sys_mod_count>1</sys_mod_count>
+        <sys_name>License Monitors</sys_name>
+        <sys_overrides/>
+        <sys_package display_value="License Scanner" source="x_delde_license">1220c0668775f6509b22a7980cbb35a0</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="License Scanner">1220c0668775f6509b22a7980cbb35a0</sys_scope>
+        <sys_update_name>sys_app_module_d394b42c87c73614d48e33750cbb350f</sys_update_name>
+        <sys_updated_by>pchhantyal</sys_updated_by>
+        <sys_updated_on>2026-02-10 13:23:06</sys_updated_on>
+        <timeline_page/>
+        <title>License Monitors</title>
+        <uncancelable>false</uncancelable>
+        <ux_list/>
+        <view_name/>
+        <window_name/>
+    </sys_app_module>
+</record_update>

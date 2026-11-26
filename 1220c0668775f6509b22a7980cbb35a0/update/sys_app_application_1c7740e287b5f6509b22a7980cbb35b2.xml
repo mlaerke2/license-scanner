@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?><record_update sys_domain="global" table="sys_app_application">
+    <sys_app_application action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <category display_value="Custom Applications">e0355b31ef303000a61d5a3615c0fb78</category>
+        <description/>
+        <device_type>browser</device_type>
+        <hint/>
+        <name>License scanner</name>
+        <order>100</order>
+        <roles>usage_admin</roles>
+        <sys_class_name>sys_app_application</sys_class_name>
+        <sys_created_by>pchhantyal</sys_created_by>
+        <sys_created_on>2025-12-16 11:48:20</sys_created_on>
+        <sys_domain>global</sys_domain>
+        <sys_domain_path>/</sys_domain_path>
+        <sys_id>1c7740e287b5f6509b22a7980cbb35b2</sys_id>
+        <sys_mod_count>0</sys_mod_count>
+        <sys_name>License scanner</sys_name>
+        <sys_overrides/>
+        <sys_package display_value="License Scanner" source="x_delde_license">1220c0668775f6509b22a7980cbb35a0</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="License Scanner">1220c0668775f6509b22a7980cbb35a0</sys_scope>
+        <sys_update_name>sys_app_application_1c7740e287b5f6509b22a7980cbb35b2</sys_update_name>
+        <sys_updated_by>pchhantyal</sys_updated_by>
+        <sys_updated_on>2025-12-16 11:48:20</sys_updated_on>
+        <title>License scanner</title>
+        <view_name/>
+    </sys_app_application>
+</record_update>

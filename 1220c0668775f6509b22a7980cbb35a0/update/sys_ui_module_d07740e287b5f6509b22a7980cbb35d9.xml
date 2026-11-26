@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?><record_update sys_domain="global" table="sys_ui_module">
+    <sys_ui_module action="INSERT_OR_UPDATE">
+        <active>true</active>
+        <application display_value="License scanner">987740e287b5f6509b22a7980cbb35d5</application>
+        <filter/>
+        <name>Subscriptions</name>
+        <order/>
+        <path/>
+        <path_relative_to_root>false</path_relative_to_root>
+        <roles>usage_admin</roles>
+        <sys_class_name>sys_ui_module</sys_class_name>
+        <sys_created_by>pchhantyal</sys_created_by>
+        <sys_created_on>2025-12-16 11:48:21</sys_created_on>
+        <sys_domain>global</sys_domain>
+        <sys_domain_path>/</sys_domain_path>
+        <sys_id>d07740e287b5f6509b22a7980cbb35d9</sys_id>
+        <sys_mod_count>0</sys_mod_count>
+        <sys_name>Subscriptions</sys_name>
+        <sys_package display_value="License Scanner" source="x_delde_license">1220c0668775f6509b22a7980cbb35a0</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="License Scanner">1220c0668775f6509b22a7980cbb35a0</sys_scope>
+        <sys_update_name>sys_ui_module_d07740e287b5f6509b22a7980cbb35d9</sys_update_name>
+        <sys_updated_by>pchhantyal</sys_updated_by>
+        <sys_updated_on>2025-12-16 11:48:21</sys_updated_on>
+        <table>x_delde_license_subscription</table>
+        <uncancelable>false</uncancelable>
+        <view_name/>
+    </sys_ui_module>
+</record_update>

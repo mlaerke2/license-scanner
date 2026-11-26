@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?><database>
+    <element attributes="enforce_dot_walk_cross_scope_access=true" db_object_id="5fc68c6287b5f6509b22a7980cbb35eb" label="Subscription" max_length="40" name="x_delde_license_subscription" type="collection">
+        <element attributes="edge_encryption_enabled=true" label="Active" max_length="40" name="active" type="boolean"/>
+        <element attributes="edge_encryption_enabled=true" label="Last scanned" max_length="40" name="last_scanned" read_only="true" read_only_option="instance_configured" type="glide_date_time"/>
+        <element attributes="edge_encryption_enabled=true" label="Associated roles" max_length="4000" name="associated_roles" type="string"/>
+        <element attributes="edge_encryption_enabled=true,encode_utf8=false" choice="1" label="Role type" max_length="32" name="role_type" reference="license_role_type" type="reference">
+            <choice/>
+        </element>
+        <element attributes="edge_encryption_enabled=true,no_sort=true,slushbucket_ref_no_expand=true" label="Associated tables" max_length="1024" name="associated_tables" reference="sys_db_object" type="glide_list"/>
+        <element attributes="edge_encryption_enabled=true" label="Name" max_length="100" name="name" type="string"/>
+        <element attributes="edge_encryption_enabled=true,encode_utf8=false" choice="1" label="Subscription entitlement" max_length="32" name="subscription_entitlement" reference="subscription_entitlement" reference_qual="status!=1^EQ" reference_qual_condition="status!=1^EQ" type="reference">
+            <choice/>
+        </element>
+        <element attributes="edge_encryption_enabled=true" default="javascript:current.getTableName();" dynamic_default_value="b5cb83a85f220100a9ad2572f2b4773c" label="Class" max_length="80" name="sys_class_name" type="sys_class_name" use_dynamic_default="true"/>
+        <element attributes="edge_encryption_enabled=true" choice="1" label="Scan status" max_length="40" name="scan_status" type="string">
+            <choice>
+                <element inactive_on_update="false" label="In Progress" sequence="300" value="300"/>
+                <element inactive_on_update="false" label="Completed" sequence="500" value="500"/>
+                <element inactive_on_update="false" label="Skipped" sequence="400" value="400"/>
+                <element inactive_on_update="false" label="Not Initiated" sequence="100" value="100"/>
+                <element inactive_on_update="false" label="Error" sequence="600" value="600"/>
+                <element inactive_on_update="false" label="Initiated" sequence="200" value="200"/>
+            </choice>
+        </element>
+        <element attributes="edge_encryption_enabled=true" label="Table Names" max_length="4000" name="table_names" type="string"/>
+        <element attributes="edge_encryption_enabled=true" label="Description" max_length="65536" name="description" read_only="true" read_only_option="instance_configured" type="html"/>
+        <element attributes="ignore_filter_on_new=true" default="javascript:global.getNextObjNumberPadded();" label="Number" max_length="40" name="number" read_only="true" read_only_option="instance_configured" type="string"/>
+        <element attributes="edge_encryption_enabled=true,no_sort=true,slushbucket_ref_no_expand=true" label="Application entitlement" max_length="1024" name="application_entitlement" reference="license_family" type="glide_list"/>
+        <index name="index">
+            <element name="role_type"/>
+        </index>
+        <index name="index2">
+            <element name="subscription_entitlement"/>
+        </index>
+        <index name="index3">
+            <element name="sys_class_name"/>
+        </index>
+    </element>
+</database>
