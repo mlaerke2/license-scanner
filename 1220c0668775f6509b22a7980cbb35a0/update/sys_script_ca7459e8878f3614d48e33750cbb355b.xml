@@ -33,6 +33,9 @@
 
     // Look up the licensed roles of the selected license families for the chosen role type.
     // Before rule: sets the field on current, no extra update.
+    // Only when the entitlement or role type is set or changed, so roles added by hand
+    // survive later saves such as the scanner's status updates.
+    if (!current.isNewRecord() && !current.application_entitlement.changes() && !current.role_type.changes()) return;
     var families = current.getValue("application_entitlement");
     if (!families) return;
 
