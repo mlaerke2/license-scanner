@@ -23,4 +23,5 @@
         <value>30</value>
         <write_roles/>
     </sys_properties>
+    <sys_translated_text action="delete_multiple" query="documentkey=4a4166141f49439484976cf492844255"/>
 </record_update>
