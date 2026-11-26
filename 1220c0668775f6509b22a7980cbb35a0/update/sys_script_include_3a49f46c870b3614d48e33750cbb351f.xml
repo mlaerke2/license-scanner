@@ -32,6 +32,11 @@ ScannerUtils.prototype = {
         ERROR: '600'
     },
 
+    /* Rank of license types and behaviour: a user counts once per module, at the highest level. */
+    RANK: { 'Fulfiller': 3, 'Business Stakeholder': 2, 'Approver': 2, 'Requester': 1 },
+    COUNTED_ELSEWHERE: /^Counted under \S+ \(higher license in the same module\)\. /,
+    SEEN_IN: / \[from \S+\]$/,
+
     initialize: function() {
         this.lookbackDays = this._intProperty('lookback_days', 30);
         this.excludedRoles = gs.getProperty(this.PROPERTY_PREFIX + 'excluded_roles', 'admin');
@@ -70,13 +75,12 @@ ScannerUtils.prototype = {
             var classification = this.classifyUsers(users, tables);
             var summary = this.populateLicenseMonitor(sub, users, classification, runId);
             this._retirePreviousRuns(sub.getUniqueValue(), runId);
+            var group = this.reconcileModule(sub.getUniqueValue());
 
             sub = this._reload(sub);
             sub.setValue('last_scanned', new GlideDateTime());
-            this._setScanState(sub, this.STATUS.COMPLETED,
-                'Scanned ' + users.length + ' users on ' + tables.length + ' tables (last ' + this.lookbackDays + ' days). ' +
-                'Fulfiller: ' + summary.Fulfiller + ', Business Stakeholder: ' + summary['Business Stakeholder'] +
-                ', Requester: ' + summary.Requester + '. Run ' + runId);
+            this._setScanState(sub, this.STATUS.COMPLETED, this._summaryMessage(sub, runId));
+            this._refreshSummaries(group, sub.getUniqueValue());
             return summary;
         } catch (e) {
             gs.error('[License Scanner] Scan failed for ' + subscriptionSysId + ': ' + e + (e && e.stack ? '\n' + e.stack : ''));
@@ -381,6 +385,163 @@ ScannerUtils.prototype = {
             purge.addQuery('sys_created_on', '<', cutoff);
             purge.deleteMultiple();
         }
+    },
+
+    /* ------------------------------------------------------------------ */
+    /*  One classification per user per module                            */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Subscriptions that share at least one monitored table belong to the same module.
+     * Within a module a user is counted once: in the subscription with the highest
+     * license type they hold, with the highest behaviour seen in any of the module's
+     * subscriptions. The other records stay as history (latest=false, status Skipped).
+     * @param subscriptionSysId {string}
+     * @return {Array} the module's subscriptions [{id, number, rank}]
+     */
+    reconcileModule: function(subscriptionSysId) {
+        var group = this._moduleGroup(subscriptionSysId);
+        if (!group.length) return group;
+
+        var byUser = {};
+        group.forEach(function(s) {
+            s.runId = this._currentRun(s.id);
+            if (!s.runId || (s.status == this.STATUS.IN_PROGRESS && s.id != subscriptionSysId)) return;   // reconciled when that scan finishes
+            var mon = new GlideRecord(this.MONITOR_TABLE);
+            mon.addQuery('subscription', s.id);
+            mon.addQuery('scan_run', s.runId);
+            mon.query();
+            while (mon.next()) {
+                var u = mon.getValue('user');
+                var acting = mon.getDisplayValue('acting_as');
+                (byUser[u] = byUser[u] || []).push({
+                    sysId: mon.getUniqueValue(), sub: s,
+                    actingAs: mon.getValue('acting_as'), actingRank: this.RANK[acting] || 0,
+                    evidence: (mon.getValue('evidence') || '').replace(this.COUNTED_ELSEWHERE, ''),
+                    latest: mon.getValue('latest') == '1' || mon.getValue('latest') == 'true',
+                    status: mon.getValue('status'), rawEvidence: mon.getValue('evidence') || ''
+                });
+            }
+        }, this);
+
+        Object.keys(byUser).forEach(function(u) {
+            var list = byUser[u];
+            list.sort(function(a, b) {
+                return (b.sub.rank - a.sub.rank) || (b.actingRank - a.actingRank) || (a.sub.number < b.sub.number ? -1 : 1);
+            });
+            var winner = list[0];
+            var best = list.reduce(function(m, r) { return r.actingRank > m.actingRank ? r : m; }, winner);
+
+            var w = { latest: true, status: 'Completed', evidence: winner.evidence };
+            if (best !== winner) {
+                w.acting_as = best.actingAs;
+                w.evidence = best.evidence.replace(this.SEEN_IN, '') + ' [from ' + best.sub.number + ']';
+            }
+            this._updateMonitor(winner, w);
+
+            for (var i = 1; i < list.length; i++) {
+                this._updateMonitor(list[i], {
+                    latest: false, status: 'Skipped',
+                    evidence: 'Counted under ' + winner.sub.number + ' (higher license in the same module). ' + list[i].evidence
+                });
+            }
+        }, this);
+        return group;
+    },
+
+    /**
+     * All subscriptions connected to this one through shared tables.
+     */
+    _moduleGroup: function(subscriptionSysId) {
+        var all = [];
+        var sub = new GlideRecord(this.SUBSCRIPTION_TABLE);
+        sub.query();
+        while (sub.next()) {
+            var tables = {};
+            (sub.getValue('table_names') || '').split(',').forEach(function(t) { t = t.trim(); if (t) tables[t] = true; });
+            all.push({ id: sub.getUniqueValue(), number: sub.getValue('number'), status: sub.getValue('scan_status'),
+                rank: this.RANK[sub.getDisplayValue('role_type')] || 0, tables: tables });
+        }
+        var shares = function(a, b) {
+            for (var t in a.tables) if (b.tables[t]) return true;
+            return false;
+        };
+        var start = all.filter(function(s) { return s.id == subscriptionSysId; });
+        if (!start.length) return [];
+        var group = [start[0]], queue = [start[0]];
+        while (queue.length) {
+            var cur = queue.shift();
+            all.forEach(function(s) {
+                if (group.indexOf(s) == -1 && shares(cur, s)) { group.push(s); queue.push(s); }
+            });
+        }
+        return group;
+    },
+
+    /**
+     * The scan_run of the subscription's most recent monitor record.
+     */
+    _currentRun: function(subscriptionSysId) {
+        var mon = new GlideRecord(this.MONITOR_TABLE);
+        mon.addQuery('subscription', subscriptionSysId);
+        mon.addNotNullQuery('scan_run');
+        mon.orderByDesc('sys_created_on');
+        mon.setLimit(1);
+        mon.query();
+        return mon.next() ? mon.getValue('scan_run') : '';
+    },
+
+    _updateMonitor: function(rec, values) {
+        var changed = values.latest != rec.latest || values.status != rec.status ||
+            (values.evidence || '').substring(0, 1000) != rec.rawEvidence ||
+            (values.acting_as && values.acting_as != rec.actingAs);
+        if (!changed) return;
+        var mon = new GlideRecord(this.MONITOR_TABLE);
+        if (!mon.get(rec.sysId)) return;
+        mon.setValue('latest', values.latest);
+        mon.setValue('status', values.status);
+        mon.setValue('evidence', (values.evidence || '').substring(0, 1000));
+        if (values.acting_as) mon.setValue('acting_as', values.acting_as);
+        mon.setWorkflow(false);
+        mon.update();
+    },
+
+    /**
+     * Scan message built from the run's records after reconciliation.
+     */
+    _summaryMessage: function(sub, runId) {
+        var counts = { 'Fulfiller': 0, 'Business Stakeholder': 0, 'Requester': 0 };
+        var total = 0, elsewhere = 0;
+        var mon = new GlideRecord(this.MONITOR_TABLE);
+        mon.addQuery('subscription', sub.getUniqueValue());
+        mon.addQuery('scan_run', runId);
+        mon.query();
+        while (mon.next()) {
+            total++;
+            if (mon.getValue('status') == 'Skipped') { elsewhere++; continue; }
+            var a = mon.getDisplayValue('acting_as');
+            counts[a] = (counts[a] || 0) + 1;
+        }
+        var tables = this._existingTables(sub.getValue('table_names')).length;
+        return 'Scanned ' + total + ' users on ' + tables + ' tables (last ' + this.lookbackDays + ' days). ' +
+            'Fulfiller: ' + counts.Fulfiller + ', Business Stakeholder: ' + counts['Business Stakeholder'] +
+            ', Requester: ' + counts.Requester + '.' +
+            (elsewhere ? ' Counted under a higher license in the same module: ' + elsewhere + '.' : '') +
+            ' Run ' + runId;
+    },
+
+    /**
+     * Update the scan message of the other completed subscriptions in the module.
+     */
+    _refreshSummaries: function(group, exceptSysId) {
+        (group || []).forEach(function(s) {
+            if (s.id == exceptSysId || !s.runId) return;
+            var sub = new GlideRecord(this.SUBSCRIPTION_TABLE);
+            if (!sub.get(s.id) || sub.getValue('scan_status') != this.STATUS.COMPLETED) return;
+            sub.setValue('scan_message', this._summaryMessage(sub, s.runId).substring(0, 1000));
+            sub.setWorkflow(false);
+            sub.update();
+        }, this);
     },
 
     /* ------------------------------------------------------------------ */
