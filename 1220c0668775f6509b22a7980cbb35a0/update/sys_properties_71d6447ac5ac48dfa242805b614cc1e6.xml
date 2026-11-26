@@ -23,4 +23,5 @@
         <value>admin</value>
         <write_roles/>
     </sys_properties>
+    <sys_translated_text action="delete_multiple" query="documentkey=71d6447ac5ac48dfa242805b614cc1e6"/>
 </record_update>
