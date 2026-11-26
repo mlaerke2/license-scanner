@@ -14,6 +14,7 @@ ScannerUtils.prototype = {
 
     SUBSCRIPTION_TABLE: 'x_delde_license_subscription',
     MONITOR_TABLE: 'x_delde_license_license_monitor',
+    HISTORY_TABLE: 'x_delde_license_scan_history',
     PROPERTY_PREFIX: 'x_delde_license.',
     CHUNK_SIZE: 100,
     MAX_RECORDS_PER_USER_PER_TABLE: 50,
@@ -84,6 +85,7 @@ ScannerUtils.prototype = {
             sub = this._reload(sub);
             sub.setValue('last_scanned', new GlideDateTime());
             this._setScanState(sub, this.STATUS.COMPLETED, this._summaryMessage(sub, runId));
+            this._writeHistory(sub, runId);
             this._refreshSummaries(group, sub.getUniqueValue());
             return summary;
         } catch (e) {
@@ -557,25 +559,74 @@ ScannerUtils.prototype = {
     /**
      * Scan message built from the run's records after reconciliation.
      */
-    _summaryMessage: function(sub, runId) {
-        var counts = { 'Fulfiller': 0, 'Business Stakeholder': 0, 'Requester': 0 };
-        var total = 0, elsewhere = 0;
+    _runCounts: function(sub, runId) {
+        var c = { total: 0, elsewhere: 0, 'Fulfiller': 0, 'Business Stakeholder': 0, 'Requester': 0 };
         var mon = new GlideRecord(this.MONITOR_TABLE);
         mon.addQuery('subscription', sub.getUniqueValue());
         mon.addQuery('scan_run', runId);
         mon.query();
         while (mon.next()) {
-            total++;
-            if (mon.getValue('status') == 'Skipped') { elsewhere++; continue; }
+            c.total++;
+            if (mon.getValue('status') == 'Skipped') { c.elsewhere++; continue; }
             var a = mon.getDisplayValue('acting_as');
-            counts[a] = (counts[a] || 0) + 1;
+            c[a] = (c[a] || 0) + 1;
         }
+        return c;
+    },
+
+    _summaryMessage: function(sub, runId) {
+        var c = this._runCounts(sub, runId);
         var tables = this._existingTables(sub.getValue('table_names')).length;
-        return 'Scanned ' + total + ' users on ' + tables + ' tables (last ' + this.lookbackDays + ' days). ' +
-            'Fulfiller: ' + counts.Fulfiller + ', Business Stakeholder: ' + counts['Business Stakeholder'] +
-            ', Requester: ' + counts.Requester + '.' +
-            (elsewhere ? ' Counted under a higher license in the same module: ' + elsewhere + '.' : '') +
+        return 'Scanned ' + c.total + ' users on ' + tables + ' tables (last ' + this.lookbackDays + ' days). ' +
+            'Fulfiller: ' + c.Fulfiller + ', Business Stakeholder: ' + c['Business Stakeholder'] +
+            ', Requester: ' + c.Requester + '.' +
+            (c.elsewhere ? ' Counted under a higher license in the same module: ' + c.elsewhere + '.' : '') +
             ' Run ' + runId;
+    },
+
+    /**
+     * One Scan History row per subscription per run, with the counts after reconciliation.
+     * period_latest marks the last run of the subscription in each week, so trends do not
+     * double count when a subscription is scanned more than once in a week.
+     */
+    _writeHistory: function(sub, runId) {
+        var c = this._runCounts(sub, runId);
+        var h = new GlideRecord(this.HISTORY_TABLE);
+        h.addQuery('subscription', sub.getUniqueValue());
+        h.addQuery('scan_run', runId);
+        h.query();
+        var isNew = !h.next();
+        if (isNew) {
+            h.initialize();
+            h.setValue('subscription', sub.getUniqueValue());
+            h.setValue('scan_run', runId);
+            h.setValue('scanned_on', sub.getValue('last_scanned') || new GlideDateTime());
+        }
+        h.setValue('users', c.total);
+        h.setValue('fulfiller', c.Fulfiller);
+        h.setValue('business_stakeholder', c['Business Stakeholder']);
+        h.setValue('requester', c.Requester);
+        h.setValue('counted_elsewhere', c.elsewhere);
+        if (isNew) h.setValue('period_latest', true);
+        var id = isNew ? h.insert() : h.update();
+        if (!isNew) return;
+
+        // only the newest run in the same week counts for the trend
+        var when = new GlideDateTime(h.getValue('scanned_on'));
+        var from = new GlideDateTime(when); from.addDaysUTC(-7);
+        var older = new GlideRecord(this.HISTORY_TABLE);
+        older.addQuery('subscription', sub.getUniqueValue());
+        older.addQuery('period_latest', true);
+        older.addQuery('sys_id', '!=', id);
+        older.addQuery('scanned_on', '>=', from);
+        older.query();
+        while (older.next()) {
+            var o = new GlideDateTime(older.getValue('scanned_on'));
+            if (o.getWeekOfYearUTC() == when.getWeekOfYearUTC() && o.getYearUTC() == when.getYearUTC()) {
+                older.setValue('period_latest', false);
+                older.update();
+            }
+        }
     },
 
     /**
@@ -589,6 +640,7 @@ ScannerUtils.prototype = {
             sub.setValue('scan_message', this._summaryMessage(sub, s.runId).substring(0, 1000));
             sub.setWorkflow(false);
             sub.update();
+            this._writeHistory(sub, s.runId);
         }, this);
     },
 
