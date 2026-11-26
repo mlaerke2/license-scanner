@@ -1,1 +1,22 @@
-<?xml version="1.0" encoding="UTF-8"?><record_update sys_domain="global" table="par_dashboard_canvas"><par_dashboard_canvas action="INSERT_OR_UPDATE"><dashboard display_value="License Scanner">6a774bc9878b36149b22a7980cbb3505</dashboard><dashboard_tab /><layout>[]</layout><sys_class_name>par_dashboard_canvas</sys_class_name><sys_created_by>harrice</sys_created_by><sys_created_on>2026-02-12 13:14:57</sys_created_on><sys_domain>global</sys_domain><sys_domain_path>/</sys_domain_path><sys_id>ae770fc9878b36149b22a7980cbb351e</sys_id><sys_mod_count>0</sys_mod_count><sys_name /><sys_overrides /><sys_package display_value="License Scanner" source="x_delde_license">1220c0668775f6509b22a7980cbb35a0</sys_package><sys_policy /><sys_scope display_value="License Scanner">1220c0668775f6509b22a7980cbb35a0</sys_scope><sys_update_name>par_dashboard_canvas_ae770fc9878b36149b22a7980cbb351e</sys_update_name><sys_updated_by>malimooti.cadmin</sys_updated_by><sys_updated_on>2026-11-26 17:00:00</sys_updated_on></par_dashboard_canvas></record_update>
+<?xml version="1.0" encoding="UTF-8"?><record_update sys_domain="global" table="par_dashboard_canvas">
+    <par_dashboard_canvas action="INSERT_OR_UPDATE">
+        <dashboard display_value="License Scanner">6a774bc9878b36149b22a7980cbb3505</dashboard>
+        <dashboard_tab/>
+        <layout>[]</layout>
+        <sys_class_name>par_dashboard_canvas</sys_class_name>
+        <sys_created_by>harrice</sys_created_by>
+        <sys_created_on>2026-02-12 13:14:57</sys_created_on>
+        <sys_domain>global</sys_domain>
+        <sys_domain_path>/</sys_domain_path>
+        <sys_id>ae770fc9878b36149b22a7980cbb351e</sys_id>
+        <sys_mod_count>0</sys_mod_count>
+        <sys_name/>
+        <sys_overrides/>
+        <sys_package display_value="License Scanner" source="x_delde_license">1220c0668775f6509b22a7980cbb35a0</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="License Scanner">1220c0668775f6509b22a7980cbb35a0</sys_scope>
+        <sys_update_name>par_dashboard_canvas_ae770fc9878b36149b22a7980cbb351e</sys_update_name>
+        <sys_updated_by>malimooti.cadmin</sys_updated_by>
+        <sys_updated_on>2026-11-26 17:00:00</sys_updated_on>
+    </par_dashboard_canvas>
+</record_update>
