@@ -62,7 +62,15 @@ Choose one of the two options.
 2. Create the license subscriptions (see [Configuring a license subscription](#configuring-a-license-subscription)) or import the examples.
 3. Review the [system properties](#system-properties).
 
-The dashboard is included and opens from **License Scanner → Dashboard**.
+The dashboard is included and opens from **License Scanner → Dashboard**. It shows the latest scan of every subscription:
+
+| Widget | Shows |
+|---|---|
+| Subscriptions overview | Users per subscription. |
+| Acting as compared to Role type | Heatmap of the license users hold against how they behave. |
+| Acting as per subscription | The same split for each subscription, so you can see which module the savings are in. |
+| Fulfiller – review required | Users with a Fulfiller license who act as Business Stakeholder or Requester (possible savings). |
+| Business Stakeholder – review required | Users with a Business Stakeholder license who act as Requester or Fulfiller. |
 
 ---
 
