@@ -23,4 +23,5 @@
         <value>comments,watch_list,sys_tags</value>
         <write_roles/>
     </sys_properties>
+    <sys_translated_text action="delete_multiple" query="documentkey=d4cec039765a4218bb4647251bb6b9d3"/>
 </record_update>
