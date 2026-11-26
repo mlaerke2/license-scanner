@@ -126,23 +126,59 @@ ScannerUtils.prototype = {
     /* ------------------------------------------------------------------ */
 
     /**
-     * Active, interactive users granted at least one of the roles.
+     * Active, interactive users who hold at least one of the roles in their own right,
+     * not only because another role they hold contains it.
      * @param associatedRoles {string} comma separated role names
      * @return {Array} user sys_ids
      */
     subscribedUsers: function(associatedRoles) {
         if (!associatedRoles) return [];
 
-        var ga = new GlideAggregate('sys_user_has_role');
+        // user -> {role name: true} for the associated roles the user holds
+        var held = {};
+        var gr = new GlideRecord('sys_user_has_role');
         // The flag is empty on many users: '=false' and '!=true' both skip empty values, so test for empty OR false
-        ga.addEncodedQuery('role.nameIN' + associatedRoles + '^user.active=true^user.web_service_access_onlyISEMPTY^ORuser.web_service_access_only=false');
-        if (!this.includeInheritedRoles) ga.addNullQuery('included_in_role');
-        ga.addNotNullQuery('user');
-        ga.groupBy('user');
-        ga.query();
-        var users = [];
-        while (ga.next()) users.push(ga.getValue('user'));
-        return users;
+        gr.addEncodedQuery('role.nameIN' + associatedRoles + '^user.active=true^user.web_service_access_onlyISEMPTY^ORuser.web_service_access_only=false');
+        gr.addNotNullQuery('user');
+        gr.query();
+        while (gr.next()) {
+            var u = gr.getValue('user');
+            (held[u] = held[u] || {})[gr.role.name.toString()] = true;
+        }
+        var users = Object.keys(held);
+        if (this.includeInheritedRoles || !users.length) return users;
+
+        // A role only counts when the user does not also hold a role that contains it
+        // (for example sn_incident_read inside sn_incident_write). included_in_role is not
+        // reliable for this, and inherited=true is also set for roles granted through groups.
+        var parents = {};   // child role -> [parent roles]
+        var all = {};
+        var c = new GlideRecord('sys_user_role_contains');
+        c.addQuery('contains.name', 'IN', associatedRoles);
+        c.query();
+        while (c.next()) {
+            var child = c.contains.name.toString(), parent = c.role.name.toString();
+            if (!parent || parent == child) continue;
+            (parents[child] = parents[child] || []).push(parent);
+            all[parent] = true;
+        }
+        var parentNames = Object.keys(all);
+        if (!parentNames.length) return users;
+
+        var holdsParent = {};   // user -> {parent role: true}
+        this._chunks(users).forEach(function(chunk) {
+            var p = new GlideRecord('sys_user_has_role');
+            p.addQuery('user', 'IN', chunk.join(','));
+            p.addQuery('role.name', 'IN', parentNames.join(','));
+            p.query();
+            while (p.next()) (holdsParent[p.getValue('user')] = holdsParent[p.getValue('user')] || {})[p.role.name.toString()] = true;
+        });
+        return users.filter(function(u) {
+            var mine = holdsParent[u] || {};
+            return Object.keys(held[u]).some(function(role) {
+                return !(parents[role] || []).some(function(par) { return mine[par]; });
+            });
+        });
     },
 
     /**
