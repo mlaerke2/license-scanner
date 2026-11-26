@@ -31,21 +31,15 @@
         <role_conditions/>
         <script><![CDATA[(function executeRule(current, previous /*null when async*/ ) {
 
-    var associated_tables = current.getValue("associated_tables");
-    var tableGr = new GlideRecord("sys_db_object");
-    tableGr.addEncodedQuery("sys_idIN" + current.getValue("associated_tables"));
-    tableGr.query();
+    // Derive the comma separated table names from the Associated tables list (before rule: no extra update).
     var tables = [];
+    var tableGr = new GlideRecord("sys_db_object");
+    tableGr.addQuery("sys_id", "IN", current.getValue("associated_tables") || "");
+    tableGr.query();
     while (tableGr.next()) {
         tables.push(tableGr.getValue("name"));
     }
-
-    var licenseDef = new GlideRecord("x_delde_license_subscription");
-    if (licenseDef.get(current.sys_id)) {
-        licenseDef.setValue("table_names", tables.toString());
-        licenseDef.update();
-    }
-
+    current.setValue("table_names", tables.join(","));
 
 })(current, previous);]]></script>
         <sys_class_name>sys_script</sys_class_name>
@@ -61,10 +55,10 @@
         <sys_policy/>
         <sys_scope display_value="License Scanner">1220c0668775f6509b22a7980cbb35a0</sys_scope>
         <sys_update_name>sys_script_034830a8870b3614d48e33750cbb3521</sys_update_name>
-        <sys_updated_by>pchhantyal</sys_updated_by>
-        <sys_updated_on>2026-02-10 14:08:25</sys_updated_on>
+        <sys_updated_by>malimooti.cadmin</sys_updated_by>
+        <sys_updated_on>2026-11-26 16:00:00</sys_updated_on>
         <template/>
-        <when>after</when>
+        <when>before</when>
     </sys_script>
     <sys_translated_text action="delete_multiple" query="documentkey=034830a8870b3614d48e33750cbb3521"/>
 </record_update>

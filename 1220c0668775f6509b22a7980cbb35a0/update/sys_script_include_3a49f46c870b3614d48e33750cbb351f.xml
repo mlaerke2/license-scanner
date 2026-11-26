@@ -11,424 +11,483 @@
         <sandbox_callable>false</sandbox_callable>
         <script><![CDATA[var ScannerUtils = Class.create();
 ScannerUtils.prototype = {
-    initialize: function() {
 
-		/*var month = '3'; //3, 6, 9, 12
-		this.CREATED_ON = "sys_created_onONLast " + month + " months@javascript:gs.beginningOfLast"+ month+ "Months()@javascript:gs.endOfLast"+ month + "Months()";
-		*/
+    SUBSCRIPTION_TABLE: 'x_delde_license_subscription',
+    MONITOR_TABLE: 'x_delde_license_license_monitor',
+    PROPERTY_PREFIX: 'x_delde_license.',
+    CHUNK_SIZE: 100,
+    MAX_RECORDS_PER_USER_PER_TABLE: 50,
 
-		var days = "30"; // 60, 90, 120
-		this.CREATED_ON="sys_created_onONLast " + days + " days@javascript:gs.beginningOfLast" + days +"Days()@javascript:gs.endOfLast" + days +"Days()^ORDERBYDESCsys_created_on";
+    /* Fields that identify the person a record is FOR (the customer / requester).
+       A user who writes to or opens a record where they are named in one of these
+       fields is acting on their own behalf, not as a fulfiller. */
+    REQUESTER_FIELDS: ['caller_id', 'requested_for', 'opened_for', 'contact', 'consumer', 'requested_by'],
 
-
+    STATUS: {
+        NOT_INITIATED: '100',
+        INITIATED: '200',
+        IN_PROGRESS: '300',
+        SKIPPED: '400',
+        COMPLETED: '500',
+        ERROR: '600'
     },
 
-	/**
-     * Get Subscription role sys ID based on its name
-     * @param roleName: String, subscription name
-     * @return {sysId}
+    initialize: function() {
+        this.lookbackDays = this._intProperty('lookback_days', 30);
+        this.excludedRoles = gs.getProperty(this.PROPERTY_PREFIX + 'excluded_roles', 'admin');
+        this.includeInheritedRoles = gs.getProperty(this.PROPERTY_PREFIX + 'include_inherited_roles', 'false') == 'true';
+        this.ignoredAuditFields = this._listProperty('ignored_audit_fields', 'comments,watch_list,sys_tags');
+        this.historyRetentionDays = this._intProperty('history_retention_days', 365);
+
+        this.windowStart = new GlideDateTime();
+        this.windowStart.addDaysUTC(-this.lookbackDays);
+
+        this._roleTypeCache = {};
+    },
+
+    /* ------------------------------------------------------------------ */
+    /*  Scan orchestration                                                */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Run a complete scan for one subscription. Sets status 300 while running,
+     * 500 when done and 600 (with the error in scan_message) on failure.
+     * @param subscriptionSysId {string}
+     * @return {object|null} summary counts, or null on error
      */
-    getSubRoleSysId: function (roleName) {
-        var roleTypeGr = new GlideRecord('license_role_type');
-        roleTypeGr.addActiveQuery();
-        roleTypeGr.addQuery('name', roleName);
-        roleTypeGr.query();
-        if (roleTypeGr.hasNext()) {
-            roleTypeGr.next();
-            return roleTypeGr.getUniqueValue();
+    runScan: function(subscriptionSysId) {
+        var sub = new GlideRecord(this.SUBSCRIPTION_TABLE);
+        if (!sub.get(subscriptionSysId)) return null;
+
+        var runId = gs.generateGUID();
+        this._setScanState(sub, this.STATUS.IN_PROGRESS, 'Scan started ' + new GlideDateTime().getDisplayValue());
+
+        try {
+            var tables = this._existingTables(sub.getValue('table_names'));
+            var users = this.subscribedUsers(sub.getValue('associated_roles'));
+            users = this._nonExcludedUsers(users, this.excludedRoles);
+
+            var classification = this.classifyUsers(users, tables);
+            var summary = this.populateLicenseMonitor(sub, users, classification, runId);
+            this._retirePreviousRuns(sub.getUniqueValue(), runId);
+
+            sub = this._reload(sub);
+            sub.setValue('last_scanned', new GlideDateTime());
+            this._setScanState(sub, this.STATUS.COMPLETED,
+                'Scanned ' + users.length + ' users on ' + tables.length + ' tables (last ' + this.lookbackDays + ' days). ' +
+                'Fulfiller: ' + summary.Fulfiller + ', Business Stakeholder: ' + summary['Business Stakeholder'] +
+                ', Requester: ' + summary.Requester + '. Run ' + runId);
+            return summary;
+        } catch (e) {
+            gs.error('[License Scanner] Scan failed for ' + subscriptionSysId + ': ' + e + (e && e.stack ? '\n' + e.stack : ''));
+            this._setScanState(this._reload(sub), this.STATUS.ERROR, 'Scan failed: ' + e);
+            return null;
         }
     },
 
     /**
-     * Scan Subscription table for new purchases
-     * @return {count}
+     * Kept for backwards compatibility with existing callers.
      */
-    checkForSubscriptions: function () {
-        var subscriptionNamesList = [];
-        var subscriptionsGR = new GlideRecord('license_details');
-        subscriptionsGR.addEncodedQuery('category!=1');
-        subscriptionsGR.query();
-        while (subscriptionsGR.next()) {
-            if (!this.isLidExisting(subscriptionsGR.getUniqueValue())) {
-                var newName = subscriptionsGR.getValue('name').split('-');
-                subscriptionNamesList.push({
-                    "name": newName[0].trim(),
-                    "sysId": subscriptionsGR.getUniqueValue(),
-                    "roleType": subscriptionsGR.getValue('measured_role_types'),
-                });
-            }
-        }
+    processScan: function(rolesStr, licenseDefinitionSysId, roleType) {
+        return this.runScan(licenseDefinitionSysId);
+    },
+
+    /**
+     * Mark scans that have been "In Progress" for too long as Error so they can run again.
+     * @return {number} number of subscriptions reset
+     */
+    resetStuckScans: function() {
+        var hours = this._intProperty('stuck_scan_hours', 6);
+        var cutoff = new GlideDateTime();
+        cutoff.addSeconds(-hours * 3600);
+
+        var sub = new GlideRecord(this.SUBSCRIPTION_TABLE);
+        sub.addQuery('scan_status', this.STATUS.IN_PROGRESS);
+        sub.addQuery('sys_updated_on', '<', cutoff);
+        sub.query();
         var count = 0;
-        for (var i = 0; i < subscriptionNamesList.length; i++) {
-            this.populateLicenseDefinitions(subscriptionNamesList[i].name, subscriptionNamesList[i].sysId);
+        while (sub.next()) {
+            this._setScanState(sub, this.STATUS.ERROR, 'Scan did not finish within ' + hours + ' hours and was reset.');
             count++;
         }
         return count;
     },
 
+    /* ------------------------------------------------------------------ */
+    /*  Users in scope                                                    */
+    /* ------------------------------------------------------------------ */
+
     /**
-     * Triggered from BR in Subscription table to create new LID record if new sub is purchased 
-     * @param subName: String, subscription name
-     * @param subSysId: String, sys id
-     * @return {sysId}
+     * Active, interactive users granted at least one of the roles.
+     * @param associatedRoles {string} comma separated role names
+     * @return {Array} user sys_ids
      */
-    populateLicenseDefinitions: function (subName, subSysId) {
-        if (!this.isLidExisting(subSysId)) {
-            var newName = subName.split('-');
-            var newLidRecord = new GlideRecord('x_delde_license_subscription');
-            newLidRecord.initialize();
-            newLidRecord.active = false;
-            newLidRecord.subscription = subSysId;
-            newLidRecord.name = newName.trim();
-            var newLidSysId = newLidRecord.insert();
+    subscribedUsers: function(associatedRoles) {
+        if (!associatedRoles) return [];
 
-            return newLidSysId;
-        }
-
+        var ga = new GlideAggregate('sys_user_has_role');
+        ga.addEncodedQuery('role.nameIN' + associatedRoles + '^user.active=true^user.web_service_access_only=false');
+        if (!this.includeInheritedRoles) ga.addNullQuery('included_in_role');
+        ga.addNotNullQuery('user');
+        ga.groupBy('user');
+        ga.query();
+        var users = [];
+        while (ga.next()) users.push(ga.getValue('user'));
+        return users;
     },
 
     /**
-     * Process scanning
-     * @param rolesArr: Comma separated list of roles
-     * @param licenseDefinitionSysId: sys_id
-	 * @param subRoleName : license role type of the subscription
-     * @return {}
+     * Remove users that hold any of the excluded roles.
      */
-    processScan: function (rolesStr, licenseDefinitionSysId, roleType) {
+    _nonExcludedUsers: function(userArr, excludedRoles) {
+        if (!excludedRoles || !userArr.length) return userArr;
+        var excluded = {};
+        this._chunks(userArr).forEach(function(chunk) {
+            var ga = new GlideAggregate('sys_user_has_role');
+            ga.addQuery('user', 'IN', chunk.join(','));
+            ga.addQuery('role.name', 'IN', excludedRoles);
+            ga.groupBy('user');
+            ga.query();
+            while (ga.next()) excluded[ga.getValue('user')] = true;
+        });
+        return userArr.filter(function(u) { return !excluded[u]; });
+    },
 
-        var userArr = this.subscribedUsers(rolesStr);
+    /* ------------------------------------------------------------------ */
+    /*  Classification                                                    */
+    /* ------------------------------------------------------------------ */
 
-        var uniqueUsersArr = this.removeDuplicates(userArr);
-        var nonEcludedUsers = this._nonExcludedUsers(uniqueUsersArr, "admin");
+    /**
+     * Classify every user as Fulfiller, Business Stakeholder or Requester.
+     * Order of evidence: writes on others' records -> approvals -> views of others' records.
+     * @param users {Array} user sys_ids
+     * @param tables {Array} table names
+     * @return {object} userSysId -> {actingAs: string, evidence: string}
+     */
+    classifyUsers: function(users, tables) {
+        var result = {};
+        if (!users.length) return result;
 
-        this.populateLicenseMonitor(nonEcludedUsers, licenseDefinitionSysId, roleType);
+        var userNames = this._userNames(users);       // sys_id -> user_name
+        var byName = {};
+        Object.keys(userNames).forEach(function(id) { byName[userNames[id]] = id; });
+
+        var fulfillers = this._fulfillerEvidence(users, userNames, byName, tables);
+        var remaining = users.filter(function(u) { return !fulfillers[u]; });
+        var approvers = this._approvalEvidence(remaining);
+        remaining = remaining.filter(function(u) { return !approvers[u]; });
+        var viewers = this._viewEvidence(remaining, tables);
+
+        users.forEach(function(u) {
+            if (fulfillers[u]) result[u] = { actingAs: 'Fulfiller', evidence: fulfillers[u] };
+            else if (approvers[u]) result[u] = { actingAs: 'Business Stakeholder', evidence: approvers[u] };
+            else if (viewers[u]) result[u] = { actingAs: 'Business Stakeholder', evidence: viewers[u] };
+            else result[u] = { actingAs: 'Requester', evidence: 'No qualifying activity in the last ' + this.lookbackDays + ' days' };
+        }, this);
+        return result;
     },
 
     /**
-     * Create new records in License Monitor table 
-     * @param usersArray:List of Users
-     * @param licenseDefinitionSysId: sys_id
-     * @return 
+     * Single-user wrapper kept for backwards compatibility.
+     * @return {string} Fulfiller | Business Stakeholder | Requester
      */
-    populateLicenseMonitor: function (usersArray, licenseDefinitionSysId, roleType) {
-        this._deleteLicenseMonitors(licenseDefinitionSysId); //DELETE OLD RECORDS
-
-        
-        var newLimRecords = [];
-        for (var i = 0; i < usersArray.length; i++) {
-            var newLicenseMonitor = new GlideRecord('x_delde_license_license_monitor');
-            newLicenseMonitor.initialize();
-            newLicenseMonitor.setValue('subscription', licenseDefinitionSysId);
-            newLicenseMonitor.setValue('user', usersArray[i]);
-            newLicenseMonitor.setValue('role_type', roleType);
-            newLicenseMonitor.setValue('status', 'In progress');
-            newLimRecords.push(newLicenseMonitor.insert());
-        }
-        this.completeScanForLicenseDef(licenseDefinitionSysId);
+    isActingAsFulfiller: function(userName, tableArr, userSysId) {
+        var r = this.classifyUsers([userSysId], this._existingTables((tableArr || []).join(',')));
+        return r[userSysId] ? r[userSysId].actingAs : 'Requester';
     },
 
     /**
-     * Change the scan status of the LID after scan process is finished and populate the last scan date
-     * @param licenseDefinitionSysId: Sys Id of the LID record
-     * @return 
+     * Users who changed (sys_audit) records in the tables that are not their own.
+     * @return {object} userSysId -> evidence string
      */
+    _fulfillerEvidence: function(users, userNames, byName, tables) {
+        var evidence = {};
+        var names = users.map(function(u) { return userNames[u]; }).filter(Boolean);
+        if (!names.length) return evidence;
 
-    completeScanForLicenseDef: function (licenseDefinitionSysId) {
-        var lidRecordGr = new GlideRecord('x_delde_license_subscription');
-        if (lidRecordGr.get(licenseDefinitionSysId)) {
-            lidRecordGr.setValue('scan_status', "500");
-            lidRecordGr.setValue('last_scanned', new GlideDateTime());
-            lidRecordGr.update();
-        }
-    },
+        tables.forEach(function(table) {
+            // user_name -> [documentkeys]
+            var touched = {};
+            this._chunks(names).forEach(function(chunk) {
+                var ga = new GlideAggregate('sys_audit');
+                ga.addQuery('tablename', table);
+                ga.addQuery('user', 'IN', chunk.join(','));
+                ga.addQuery('sys_created_on', '>=', this.windowStart);
+                if (this.ignoredAuditFields.length) ga.addQuery('fieldname', 'NOT IN', this.ignoredAuditFields.join(','));
+                ga.groupBy('user');
+                ga.groupBy('documentkey');
+                ga.query();
+                while (ga.next()) {
+                    var un = ga.getValue('user');
+                    var id = byName[un];
+                    if (!id || evidence[id]) continue;
+                    touched[un] = touched[un] || [];
+                    if (touched[un].length < this.MAX_RECORDS_PER_USER_PER_TABLE) touched[un].push(ga.getValue('documentkey'));
+                }
+            }, this);
 
-    /**
-     * Check if there is License Definition record for the same Subscription
-     * @param subscribshionSysId: SysId of the Subscription record
-     * @return {boolean}
-     */
-    isLidExisting: function (subscribshionSysId) {
-        var licenseDefinitionGr = new GlideRecord('x_delde_license_subscription');
-        licenseDefinitionGr.addQuery('subscription', subscribshionSysId);
-        licenseDefinitionGr.query();
-        return licenseDefinitionGr.hasNext();
-    },
+            var docIds = [];
+            Object.keys(touched).forEach(function(un) { docIds = docIds.concat(touched[un]); });
+            if (!docIds.length) return;
+            var owners = this._recordOwners(table, docIds);   // sys_id -> {ids:{}, createdBy:''}
 
-    /**
-     * Check if there is License Monitor record for the same user and License Definition
-     * @param userSysId: SysId of the user to be checked
-     * @param lidRecord: License Definition record SysId to be checked
-     * @return {boolean}
-     */
-    isLimExisting: function (userSysId, lidRecord) {
-        var licenseMonitorGr = new GlideRecord('x_delde_license_license_monitor');
-        licenseMonitorGr.addQuery('license_definition', lidRecord);
-        licenseMonitorGr.addQuery('user', userSysId);
-        licenseMonitorGr.query();
-        if (licenseMonitorGr.hasNext()) {
-            return true;
-        }
-        return false;
-    },
-
-    /**
-     * Clear any Array of duplicates
-     * @param arrayWithDuplicates: Comma separated list of users
-     * @return {users}
-     */
-    removeDuplicates: function (arrayWithDuplicates) {
-        return arrayWithDuplicates.filter((item,
-            index) => arrayWithDuplicates.indexOf(item) === index);
-    },
-
-    /**
-     * Check if selected users are acting as Fulfilers
-     * @param userName: string, name of the user
-     * @param tableArr: array, list of tables
-     * @param userSysId: sys_id of the user
-     * @param subscriptionName: string, name of the subscription
-     * @return {actingAs} : string, subscription role type
-     */
-    isActingAsFulfiller: function (userName, tableArr, userSysId, subscriptionName) { //we need to trigger this from a BR after insert on the LIM table
-        try {
-
-
-			
-            var viewedRecords;
-            if (subscriptionName.includes("Stakeholder")) {
-                viewedRecords = this.userViewedRecord(userSysId, tableArr, subscriptionName);
-            } else {
-                var actingAs = "";
-                var created_on = this.CREATED_ON;//"sys_created_onONLast 3 months@javascript:gs.beginningOfLast3Months()@javascript:gs.endOfLast3Months()"; //created ON last 6 months
-                for (var i = 0; i < tableArr.length; i++) {
-                    var queryStringAudit = "user=" + userName + "^tablenameIN" + tableArr[i] + "^" + created_on;
-                    var sysAuditGr = new GlideRecord('sys_audit');
-                    sysAuditGr.addEncodedQuery(queryStringAudit);
-                    sysAuditGr.query();
-					
-
-                    while (sysAuditGr.next()) {
-                        
-						if (this._viewedOtherRecord(tableArr[i], sysAuditGr.getValue('documentkey'), userName)) {
-                            actingAs = "Fulfiller";
-                            return actingAs;
-                        } else {
-                            continue;
-                        }
+            Object.keys(touched).forEach(function(un) {
+                var id = byName[un];
+                if (evidence[id]) return;
+                for (var i = 0; i < touched[un].length; i++) {
+                    var doc = touched[un][i];
+                    var o = owners[doc];
+                    if (o && !this._isOwner(o, id, un)) {
+                        evidence[id] = 'Updated ' + table + ' ' + (o.number || doc) + ' owned by someone else';
+                        break;
                     }
                 }
-            }
+            }, this);
+        }, this);
+        return evidence;
+    },
 
-            //Check if the user has viewed other than his records, if yes, return Business Stakeholder, else return Requester
-            viewedRecords = this.userViewedRecord(userSysId, tableArr, subscriptionName, userName);
-            if (!viewedRecords) {
-                actingAs = "Requester";
-                return actingAs;
-            } else {
-                if (subscriptionName == "Legal Service Delivery Premium - Legal User") {
-                    actingAs = "Fulfiller";
-                    return actingAs;
+    /**
+     * Users who approved or rejected something within the scan window.
+     * @return {object} userSysId -> evidence string
+     */
+    _approvalEvidence: function(users) {
+        var evidence = {};
+        this._chunks(users).forEach(function(chunk) {
+            var ga = new GlideAggregate('sysapproval_approver');
+            ga.addQuery('approver', 'IN', chunk.join(','));
+            ga.addQuery('state', 'IN', 'approved,rejected');
+            ga.addQuery('sys_updated_on', '>=', this.windowStart);
+            ga.addAggregate('COUNT');
+            ga.groupBy('approver');
+            ga.query();
+            while (ga.next()) {
+                evidence[ga.getValue('approver')] = 'Approved or rejected ' + ga.getAggregate('COUNT') + ' item(s)';
+            }
+        }, this);
+        return evidence;
+    },
+
+    /**
+     * Users who opened records in the tables that are not their own.
+     * Understands classic UI (table.do?sys_id=) and any workspace URL (/record/table/sys_id).
+     * @return {object} userSysId -> evidence string
+     */
+    _viewEvidence: function(users, tables) {
+        var evidence = {};
+        if (!users.length || !tables.length) return evidence;
+        var tableSet = {};
+        tables.forEach(function(t) { tableSet[t] = true; });
+
+        var viewed = {};   // user -> table -> [sys_ids]
+        this._chunks(users).forEach(function(chunk) {
+            var nav = new GlideRecord('sys_ui_navigator_history');
+            nav.addQuery('user', 'IN', chunk.join(','));
+            nav.addQuery('sys_created_on', '>=', this.windowStart);
+            nav.query();
+            while (nav.next()) {
+                var parsed = this.parseRecordUrl(nav.getValue('url'));
+                if (!parsed || !tableSet[parsed.table]) continue;
+                var u = nav.getValue('user');
+                viewed[u] = viewed[u] || {};
+                var list = viewed[u][parsed.table] = viewed[u][parsed.table] || [];
+                if (list.length < this.MAX_RECORDS_PER_USER_PER_TABLE && list.indexOf(parsed.sysId) == -1) list.push(parsed.sysId);
+            }
+        }, this);
+
+        var userNames = this._userNames(Object.keys(viewed));
+        tables.forEach(function(table) {
+            var ids = [];
+            Object.keys(viewed).forEach(function(u) { if (viewed[u][table]) ids = ids.concat(viewed[u][table]); });
+            if (!ids.length) return;
+            var owners = this._recordOwners(table, ids);
+            Object.keys(viewed).forEach(function(u) {
+                if (evidence[u] || !viewed[u][table]) return;
+                var list = viewed[u][table];
+                for (var i = 0; i < list.length; i++) {
+                    var o = owners[list[i]];
+                    if (o && !this._isOwner(o, u, userNames[u])) {
+                        evidence[u] = 'Opened ' + table + ' ' + (o.number || list[i]) + ' owned by someone else';
+                        break;
+                    }
                 }
-                actingAs = "Business Stakeholder";
-                return actingAs;
+            }, this);
+        }, this);
+        return evidence;
+    },
+
+    /**
+     * Extract table and sys_id from a navigator history URL.
+     * @param url {string}
+     * @return {object|null} {table, sysId}
+     */
+    parseRecordUrl: function(url) {
+        if (!url) return null;
+        var u = url;
+        try { u = decodeURIComponent(url); } catch (ignore) { /* keep raw */ }
+        var m = u.match(/\/record\/([a-z0-9_]+)\/([0-9a-f]{32})/i);       // any workspace
+        if (m) return { table: m[1], sysId: m[2] };
+        m = u.match(/(?:^|[\/=?&])([a-z0-9_]+)\.do\?(?:[^#]*&)?sys_id=([0-9a-f]{32})/i); // classic UI
+        if (m && !/_list$/.test(m[1])) return { table: m[1], sysId: m[2] };
+        return null;
+    },
+
+    /* ------------------------------------------------------------------ */
+    /*  Monitor records and history                                       */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Insert one monitor record per user for this run.
+     * @return {object} counts per acting-as value
+     */
+    populateLicenseMonitor: function(sub, users, classification, runId) {
+        var summary = { 'Fulfiller': 0, 'Business Stakeholder': 0, 'Requester': 0 };
+        for (var i = 0; i < users.length; i++) {
+            var c = classification[users[i]] || { actingAs: 'Requester', evidence: '' };
+            var mon = new GlideRecord(this.MONITOR_TABLE);
+            mon.initialize();
+            mon.setValue('subscription', sub.getUniqueValue());
+            mon.setValue('user', users[i]);
+            mon.setValue('role_type', sub.getValue('role_type'));
+            mon.setValue('acting_as', this.getSubRoleSysId(c.actingAs));
+            mon.setValue('evidence', (c.evidence || '').substring(0, 1000));
+            mon.setValue('scan_run', runId);
+            mon.setValue('latest', true);
+            mon.setValue('status', 'Completed');
+            mon.insert();
+            summary[c.actingAs] = (summary[c.actingAs] || 0) + 1;
+        }
+        return summary;
+    },
+
+    /**
+     * Keep earlier runs as history (latest=false) and delete runs older than the retention period.
+     */
+    _retirePreviousRuns: function(subscriptionSysId, runId) {
+        var old = new GlideRecord(this.MONITOR_TABLE);
+        old.addQuery('subscription', subscriptionSysId);
+        old.addEncodedQuery('scan_run!=' + runId + '^ORscan_runISEMPTY');
+        old.addQuery('latest', true);
+        old.setValue('latest', false);
+        old.updateMultiple();
+
+        if (this.historyRetentionDays > 0) {
+            var cutoff = new GlideDateTime();
+            cutoff.addDaysUTC(-this.historyRetentionDays);
+            var purge = new GlideRecord(this.MONITOR_TABLE);
+            purge.addQuery('subscription', subscriptionSysId);
+            purge.addQuery('latest', false);
+            purge.addQuery('sys_created_on', '<', cutoff);
+            purge.deleteMultiple();
+        }
+    },
+
+    /* ------------------------------------------------------------------ */
+    /*  Helpers                                                           */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Get license_role_type sys_id by name (cached).
+     */
+    getSubRoleSysId: function(roleName) {
+        if (this._roleTypeCache[roleName] !== undefined) return this._roleTypeCache[roleName];
+        var rt = new GlideRecord('license_role_type');
+        rt.addQuery('name', roleName);
+        rt.setLimit(1);
+        rt.query();
+        this._roleTypeCache[roleName] = rt.next() ? rt.getUniqueValue() : '';
+        return this._roleTypeCache[roleName];
+    },
+
+    /**
+     * For a set of record sys_ids, who the records belong to.
+     * @return {object} sys_id -> {ids: {userSysId:true}, createdBy: user_name, number}
+     */
+    _recordOwners: function(table, sysIds) {
+        var owners = {};
+        if (!gs.tableExists(table)) return owners;
+        var probe = new GlideRecord(table);
+        var fields = this.REQUESTER_FIELDS.filter(function(f) { return probe.isValidField(f); });
+
+        this._chunks(sysIds).forEach(function(chunk) {
+            var gr = new GlideRecord(table);
+            gr.addQuery('sys_id', 'IN', chunk.join(','));
+            gr.query();
+            while (gr.next()) {
+                var o = { ids: {}, createdBy: gr.getValue('sys_created_by'), number: gr.isValidField('number') ? gr.getValue('number') : '' };
+                fields.forEach(function(f) { var v = gr.getValue(f); if (v) o.ids[v] = true; });
+                o.hasRequester = Object.keys(o.ids).length > 0;
+                owners[gr.getUniqueValue()] = o;
             }
-
-        } catch (e) {
-            gs.error("isActingAsFulfiller --> " + e);
-        }
+        });
+        return owners;
     },
 
     /**
-     * User viewed others' record i.e. not created by
-     * @param userId : sys_id of unique users in array
-     * @param tableArr : table name in array
-	 * @param subscriptionName : subscripton name
-	 * @param userName : user name
-     * @return {array||false}
+     * True when the user is the person the record is for. Falls back to the creator
+     * when the record has no requester-type field filled in.
      */
-    userViewedRecord: function (userId, tableArr, subscriptionName, userName) {
-        try {
-
-
-            //CHECK IF USER HAS UPDATED ANY APPROVAL RECORD
-            if (this._hasUpdatedApproval(userName)) return true;
-
-
-            var created_on = this.CREATED_ON;//"sys_created_onONLast 3 months@javascript:gs.beginningOfLast3Months()@javascript:gs.endOfLast3Months()"; //created ON last 6 months
-            var ui16Qstring = tableArr.join("^ORurlSTARTSWITH"); //eg. incident.do?sys_id=cf71f591db21e450b2e7d3ca4b961968&sysparm_record_target=incident
-
-            var newTableArr = []; //eg. /now/sow/record/incident/d1717591db21e450b2e7d3ca4b9619b0
-            for (var i = 0, len = tableArr.length; i < len; i++) {
-                newTableArr.push("/" + tableArr[i] + "/");
-            }
-            var polarisQstring = newTableArr.join("^ORurlLIKE");
-            var filterOut = "^urlNOT LIKE_list.do";
-
-            var records = [];
-
-            //Iterate to find if the user has read others record
-            var queryString = created_on + "^user=" + userId + "^urlSTARTSWITH" + ui16Qstring + "^ORurlLIKE" + polarisQstring + filterOut;
-            var navHistoryGr = new GlideRecord("sys_ui_navigator_history");
-            navHistoryGr.addEncodedQuery(queryString);
-            navHistoryGr.query();
-            while (navHistoryGr.next()) {
-                if (subscriptionName == "Legal Service Delivery Premium - Legal User" || subscriptionName == "Integrated Risk Management Professional - IRM Operator") {
-                    records.push({
-                        "userId": navHistoryGr.getValue("user"),
-                        "recordId": recordId,
-                        "tableName": tableName,
-                        "navigator_history_log": gs.getProperty("glide.servlet.uri") + "sys_ui_navigator_history.do?sys_id=" + navHistoryGr.getUniqueValue()
-                    });
-                    break;
-                }
-                var tableName, recordId;
-                var urlVal = navHistoryGr.getValue("url");
-                if (navHistoryGr.getValue("ui_type") == "polaris") {
-                    var s1 = urlVal.split("/now/sow/record/");
-                    tableName = s1[1].split("/")[0];
-                    recordId = s1[1].split("/")[1];
-                } else {
-                    recordId = urlVal.slice((urlVal.indexOf('sys_id=') + 7), (urlVal.indexOf('sys_id=') + 39));
-                    tableName = urlVal.slice(0, urlVal.indexOf('.do'));
-                }
-
-                if (this._viewedOtherRecord(tableName, recordId, navHistoryGr.user.user_name.toString()) == true) {
-                    records.push({
-                        "userId": navHistoryGr.getValue("user"),
-                        "recordId": recordId,
-                        "tableName": tableName,
-                        "navigator_history_log": gs.getProperty("glide.servlet.uri") + "sys_ui_navigator_history.do?sys_id=" + navHistoryGr.getUniqueValue()
-                    });
-                    break;
-                }
-            } //end while				
-
-            return records.length > 0 ? records : false;
-        } catch (err) {
-            gs.error('Error in function userViewedRecord(): ' + err);
-        }
-
+    _isOwner: function(owner, userSysId, userName) {
+        if (owner.hasRequester) return !!owner.ids[userSysId];
+        return owner.createdBy == userName;
     },
 
-    /**
-     * Users who viewed others' record
-     * @param tableName
-     * @param record_id
-     * @param userName
-     * @return {boolean}
-     */
-    _viewedOtherRecord: function (tableName, record_id, userName) {
-        if (!gs.tableExists(tableName) && !record_id && !tableName) return;
-
-		
-        var tableGr = new GlideRecord(tableName);
-        if (tableGr.get(record_id)) {
-            if (tableGr.getValue("sys_created_by") != userName)
-                return true;
-        }
-        return false;
-    },
-    /**
-     * Users subscribed to license definitions
-     * @param associatedRoles: Comma separated roles
-     * @param excludeRoles: Comma separated roles
-     * @return {null||users}
-     */
-    subscribedUsers: function (associatedRoles, excludeRoles) {
-        if (!associatedRoles) return null;
-
-        var queryString = "role.nameIN" + associatedRoles + "^user.active=true^user.web_service_access_only=false^included_in_roleISEMPTY";
-
-        //GET THE USERS WITH ASSOCIATED ROLES
-        var userRoleGa = new GlideAggregate("sys_user_has_role");
-        userRoleGa.addNotNullQuery("user");
-        userRoleGa.addEncodedQuery(queryString);
-        userRoleGa.groupBy("user");
-        userRoleGa.query();
-        var userArr = [];
-        while (userRoleGa.next()) {
-            userArr.push(userRoleGa.getValue("user"));
-        }
-
-        var uniqueUsers = this.removeDuplicates(userArr);
-        var nonExcludedUsers = [];
-
-        //NON ADMIN USERS
-        if (excludeRoles) {
-            for (var i = 0, len = uniqueUsers.length; i < len; i++) {
-                var userHasRoleGr = new GlideRecord("sys_user_has_role");
-                userHasRoleGr.addNotNullQuery("user");
-                userHasRoleGr.addEncodedQuery("user=" + uniqueUsers[i] + "role.nameIN" + excludeRoles);
-                userHasRoleGr.setLimit(1);
-                userHasRoleGr.query();
-                if (!userHasRoleGr.next())
-                    nonExcludedUsers.push(uniqueUsers[i]);
-            }
-
-        }
-
-        return (excludeRoles) ? this.removeDuplicates(nonExcludedUsers) : uniqueUsers;
+    _userNames: function(userIds) {
+        var map = {};
+        this._chunks(userIds).forEach(function(chunk) {
+            var u = new GlideRecord('sys_user');
+            u.addQuery('sys_id', 'IN', chunk.join(','));
+            u.query();
+            while (u.next()) map[u.getUniqueValue()] = u.getValue('user_name');
+        });
+        return map;
     },
 
-    /**
-     * Remove users by roles
-     * @param: userArr 
-     * @return {null||users}
-     */
-    _nonExcludedUsers: function (userArr, excludedRoles) {
-        var nonExcludedUsers = [];
-        for (var i = 0, len = userArr.length; i < len; i++) {
-            var userHasRoleGr = new GlideRecord("sys_user_has_role");
-            userHasRoleGr.addNotNullQuery("user");
-            userHasRoleGr.addEncodedQuery("user=" + userArr[i] + "^role.nameIN" + excludedRoles);
-            userHasRoleGr.setLimit(1);
-            userHasRoleGr.query();
-            if (!userHasRoleGr.next()) {
-                nonExcludedUsers.push(userArr[i]);
-            }
-
-        }
-        return nonExcludedUsers;
+    _existingTables: function(tableNames) {
+        if (!tableNames) return [];
+        var seen = {};
+        return tableNames.split(',').map(function(t) { return t.trim(); }).filter(function(t) {
+            if (!t || seen[t] || !gs.tableExists(t)) return false;
+            seen[t] = true;
+            return true;
+        });
     },
 
-    /**
-     * Delete license monitor records
-     * @param licenseDefSysId : License definitions sys_id
-     * @return 
-     */
-
-    _deleteLicenseMonitors: function (licenseDefSysId) {
-        if (!licenseDefSysId) return;
-
-        var now = new GlideDateTime();
-        var s1 = now.getDisplayValueInternal().split(" ");
-        var dd = "('" + s1[0] + "','" + s1[1] + "')"; //sys_created_on<javascript:gs.dateGenerate('2024-03-15','11:37:00')
-
-        //Delete old records
-        var monitorGr = new GlideRecord("x_delde_license_license_monitor");
-        var queryString = "subscription=" + licenseDefSysId + "^sys_created_on<javascript:gs.dateGenerate" + dd;
-        monitorGr.addEncodedQuery(queryString);
-        monitorGr.query();
-        monitorGr.deleteMultiple();
+    _setScanState: function(sub, status, message) {
+        sub.setValue('scan_status', status);
+        sub.setValue('scan_message', (message || '').substring(0, 1000));
+        sub.update();
     },
 
-    /**
-     * Returns true or false if the user have updated any approval record
-     * @param userName : user's user ID
-     * @return {boolean}
-     */
-    _hasUpdatedApproval: function (userName) {
-        if (!userName) return false;
+    _reload: function(gr) {
+        var fresh = new GlideRecord(gr.getTableName());
+        fresh.get(gr.getUniqueValue());
+        return fresh;
+    },
 
-        var approverGr = new GlideRecord("sysapproval_approver");
-        approverGr.addQuery("sys_updated_by", userName);
-        approverGr.setLimit(1);
-        approverGr.query();
-        return approverGr.hasNext();
+    _chunks: function(arr) {
+        var out = [];
+        for (var i = 0; i < arr.length; i += this.CHUNK_SIZE) out.push(arr.slice(i, i + this.CHUNK_SIZE));
+        return out;
+    },
+
+    _intProperty: function(name, fallback) {
+        var v = parseInt(gs.getProperty(this.PROPERTY_PREFIX + name, String(fallback)), 10);
+        return isNaN(v) ? fallback : v;
+    },
+
+    _listProperty: function(name, fallback) {
+        return gs.getProperty(this.PROPERTY_PREFIX + name, fallback).split(',')
+            .map(function(s) { return s.trim(); }).filter(Boolean);
+    },
+
+    removeDuplicates: function(arr) {
+        return (arr || []).filter(function(item, index) { return arr.indexOf(item) === index; });
     },
 
     type: 'ScannerUtils'
-};]]></script>
+};
+]]></script>
         <sys_class_name>sys_script_include</sys_class_name>
         <sys_created_by>pchhantyal</sys_created_by>
         <sys_created_on>2026-02-10 13:37:21</sys_created_on>
@@ -439,7 +498,7 @@ ScannerUtils.prototype = {
         <sys_policy>read</sys_policy>
         <sys_scope display_value="License Scanner">1220c0668775f6509b22a7980cbb35a0</sys_scope>
         <sys_update_name>sys_script_include_3a49f46c870b3614d48e33750cbb351f</sys_update_name>
-        <sys_updated_by>pchhantyal</sys_updated_by>
-        <sys_updated_on>2026-02-11 19:15:35</sys_updated_on>
+        <sys_updated_by>malimooti.cadmin</sys_updated_by>
+        <sys_updated_on>2026-11-26 16:00:00</sys_updated_on>
     </sys_script_include>
 </record_update>

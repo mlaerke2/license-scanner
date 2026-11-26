@@ -6,14 +6,14 @@
         <action_insert>true</action_insert>
         <action_query>false</action_query>
         <action_update>true</action_update>
-        <active>true</active>
+        <active>false</active>
         <add_message>false</add_message>
         <advanced>true</advanced>
         <change_fields>false</change_fields>
         <client_callable>false</client_callable>
         <collection>x_delde_license_license_monitor</collection>
         <condition/>
-        <description/>
+        <description>Deactivated: classification now happens inside ScannerUtils.runScan() to avoid recursive after-updates.</description>
         <execute_function>false</execute_function>
         <filter_condition table="x_delde_license_license_monitor">acting_asISEMPTY^userISNOTEMPTY^subscriptionISNOTEMPTY^EQ<item endquery="false" field="acting_as" goto="false" newquery="false" operator="ISEMPTY" or="false" value=""/>
             <item endquery="false" field="user" goto="false" newquery="false" operator="ISNOTEMPTY" or="false" value=""/>
@@ -54,8 +54,8 @@
         <sys_policy/>
         <sys_scope display_value="License Scanner">1220c0668775f6509b22a7980cbb35a0</sys_scope>
         <sys_update_name>sys_script_64bd89e0874f3614d48e33750cbb3555</sys_update_name>
-        <sys_updated_by>pchhantyal</sys_updated_by>
-        <sys_updated_on>2026-02-12 16:28:06</sys_updated_on>
+        <sys_updated_by>malimooti.cadmin</sys_updated_by>
+        <sys_updated_on>2026-11-26 16:00:00</sys_updated_on>
         <template/>
         <when>after</when>
     </sys_script>

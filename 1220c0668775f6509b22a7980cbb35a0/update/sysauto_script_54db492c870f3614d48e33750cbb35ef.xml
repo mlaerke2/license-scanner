@@ -25,14 +25,15 @@
         <run_time>1969-12-31 23:00:00</run_time>
         <run_type>weekly</run_type>
         <run_weekinmonth>1</run_weekinmonth>
-        <script><![CDATA[//Find acitve license definitions and change
-var queryString = "active=true^associated_rolesISNOTEMPTY^scan_statusNOT IN200,300";
+        <script><![CDATA[// Reset scans stuck "In Progress" so they are picked up again, then initiate all active subscriptions.
+new ScannerUtils().resetStuckScans();
+
 var licenseDefGr = new GlideRecord("x_delde_license_subscription");
-licenseDefGr.addEncodedQuery(queryString);
+licenseDefGr.addEncodedQuery("active=true^associated_rolesISNOTEMPTY^table_namesISNOTEMPTY^scan_statusNOT IN200,300");
 licenseDefGr.query();
-while(licenseDefGr.next()){
-	licenseDefGr.setValue("scan_status", "200"); //Initiated
-	licenseDefGr.update();
+while (licenseDefGr.next()) {
+    licenseDefGr.setValue("scan_status", "200"); //Initiated
+    licenseDefGr.update();
 }]]></script>
         <sys_class_name>sysauto_script</sys_class_name>
         <sys_created_by>pchhantyal</sys_created_by>
@@ -44,8 +45,8 @@ while(licenseDefGr.next()){
         <sys_policy/>
         <sys_scope display_value="License Scanner">1220c0668775f6509b22a7980cbb35a0</sys_scope>
         <sys_update_name>sysauto_script_54db492c870f3614d48e33750cbb35ef</sys_update_name>
-        <sys_updated_by>pchhantyal</sys_updated_by>
-        <sys_updated_on>2026-02-12 16:02:15</sys_updated_on>
+        <sys_updated_by>malimooti.cadmin</sys_updated_by>
+        <sys_updated_on>2026-11-26 16:00:00</sys_updated_on>
         <time_zone/>
         <upgrade_safe>false</upgrade_safe>
     </sysauto_script>

@@ -13,6 +13,9 @@
         </element>
         <element attributes="ignore_filter_on_new=true" default="javascript:global.getNextObjNumberPadded();" label="Number" max_length="40" name="number" read_only="true" read_only_option="instance_configured" type="string"/>
         <element attributes="edge_encryption_enabled=true,encode_utf8=false" label="Role type" max_length="32" name="role_type" reference="license_role_type" type="reference"/>
+        <element attributes="edge_encryption_enabled=true" label="Evidence" max_length="1000" name="evidence" read_only="true" read_only_option="instance_configured" type="string"/>
+        <element attributes="edge_encryption_enabled=true" label="Scan run" max_length="40" name="scan_run" read_only="true" read_only_option="instance_configured" type="string"/>
+        <element attributes="edge_encryption_enabled=true" default="true" label="Latest" max_length="40" name="latest" read_only="true" read_only_option="instance_configured" type="boolean"/>
         <index name="index">
             <element name="acting_as"/>
         </index>

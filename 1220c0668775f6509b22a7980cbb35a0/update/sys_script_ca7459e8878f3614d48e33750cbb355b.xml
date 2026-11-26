@@ -31,35 +31,30 @@
         <role_conditions/>
         <script><![CDATA[(function executeRule(current, previous /*null when async*/ ) {
 
-    var licenseFamilyGr = new GlideRecord("license_family");
-    licenseFamilyGr.addEncodedQuery("sys_idIN" + current.getValue("application_entitlement"));
-    licenseFamilyGr.query();
-    var applicationIDs = [];
-    while (licenseFamilyGr.next()) {
-        applicationIDs.push(licenseFamilyGr.getValue("family_id"));
-    }
+    // Look up the licensed roles of the selected license families for the chosen role type.
+    // Before rule: sets the field on current, no extra update.
+    var families = current.getValue("application_entitlement");
+    if (!families) return;
 
-	//application.sys_idINccd5e764dcd252104f34465061b06a23,7bc5a764dcd252104f34465061b06aa4,8cd5e764dcd252104f34465061b06a81,7bc5a764dcd252104f34465061b06a84,77c5a764dcd252104f34465061b06a83,63c56764dcd252104f34465061b06ae2,50d52b64dcd252104f34465061b06a4b,8cd5e764dcd252104f34465061b06abc,88d5e764dcd252104f34465061b06ac6,7bc5a764dcd252104f34465061b06a6d,7fc5a764dcd252104f34465061b06a4a,14d52b64dcd252104f34465061b06a5f,7bc5a764dcd252104f34465061b06aa3^license_role_type=fulfiller
-
-    //Find roles
-    var queryString = "application.sys_idIN" + current.getValue("application_entitlement") + "^license_role_type=" + current.role_type.id;
-	
-    if (current.role_type.id.toString() == 'business_stakeholder') {
-        queryString += "^ORlicense_role_type=approver";
-    }
-
+    var roleTypeId = current.role_type.id.toString();
     var roleGr = new GlideRecord("license_role");
-    roleGr.addEncodedQuery(queryString);
+    roleGr.addQuery("application.sys_id", "IN", families);
+    var typeCondition = roleGr.addQuery("license_role_type", roleTypeId);
+    if (roleTypeId == "business_stakeholder") {
+        typeCondition.addOrCondition("license_role_type", "approver");
+    }
     roleGr.query();
     var roles = [];
     while (roleGr.next()) {
-        roles.push(roleGr.getValue("name"));
+        var name = roleGr.getValue("name");
+        if (roles.indexOf(name) == -1) roles.push(name);
     }
 
-    var licenseDef = new GlideRecord("x_delde_license_subscription");
-    if (licenseDef.get(current.sys_id)) {
-        licenseDef.setValue("associated_roles", roles.toString());
-        licenseDef.update();
+    if (roles.length) {
+        current.setValue("associated_roles", roles.join(","));
+    } else {
+        // Keep any manually entered roles when license_role has no mapping (e.g. roles in the "Unknown" family).
+        gs.addInfoMessage("No licensed roles found in license_role for the selected families. Associated roles were left unchanged.");
     }
 
 })(current, previous);]]></script>
@@ -76,10 +71,10 @@
         <sys_policy/>
         <sys_scope display_value="License Scanner">1220c0668775f6509b22a7980cbb35a0</sys_scope>
         <sys_update_name>sys_script_ca7459e8878f3614d48e33750cbb355b</sys_update_name>
-        <sys_updated_by>pchhantyal</sys_updated_by>
-        <sys_updated_on>2026-02-11 19:59:15</sys_updated_on>
+        <sys_updated_by>malimooti.cadmin</sys_updated_by>
+        <sys_updated_on>2026-11-26 16:00:00</sys_updated_on>
         <template/>
-        <when>after</when>
+        <when>before</when>
     </sys_script>
     <sys_translated_text action="delete_multiple" query="documentkey=ca7459e8878f3614d48e33750cbb355b"/>
 </record_update>

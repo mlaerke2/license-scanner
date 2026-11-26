@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?><record_update table="sys_properties">
+    <sys_properties action="INSERT_OR_UPDATE">
+        <choices/>
+        <description>Comma separated fields. Changes only to these fields do not count as fulfiller activity.</description>
+        <ignore_cache>false</ignore_cache>
+        <is_private>false</is_private>
+        <name>x_delde_license.ignored_audit_fields</name>
+        <read_roles/>
+        <suffix>ignored_audit_fields</suffix>
+        <sys_class_name>sys_properties</sys_class_name>
+        <sys_created_by>malimooti.cadmin</sys_created_by>
+        <sys_created_on>2026-11-26 16:00:00</sys_created_on>
+        <sys_id>d4cec039765a4218bb4647251bb6b9d3</sys_id>
+        <sys_mod_count>0</sys_mod_count>
+        <sys_name>x_delde_license.ignored_audit_fields</sys_name>
+        <sys_package display_value="License Scanner" source="x_delde_license">1220c0668775f6509b22a7980cbb35a0</sys_package>
+        <sys_policy/>
+        <sys_scope display_value="License Scanner">1220c0668775f6509b22a7980cbb35a0</sys_scope>
+        <sys_update_name>sys_properties_d4cec039765a4218bb4647251bb6b9d3</sys_update_name>
+        <sys_updated_by>malimooti.cadmin</sys_updated_by>
+        <sys_updated_on>2026-11-26 16:00:00</sys_updated_on>
+        <type>string</type>
+        <value>comments,watch_list,sys_tags</value>
+        <write_roles/>
+    </sys_properties>
+</record_update>

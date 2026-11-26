@@ -26,6 +26,7 @@
         <element attributes="edge_encryption_enabled=true" label="Description" max_length="65536" name="description" read_only="true" read_only_option="instance_configured" type="html"/>
         <element attributes="ignore_filter_on_new=true" default="javascript:global.getNextObjNumberPadded();" label="Number" max_length="40" name="number" read_only="true" read_only_option="instance_configured" type="string"/>
         <element attributes="edge_encryption_enabled=true,no_sort=true,slushbucket_ref_no_expand=true" label="Application entitlement" max_length="1024" name="application_entitlement" reference="license_family" type="glide_list"/>
+        <element attributes="edge_encryption_enabled=true" label="Scan message" max_length="1000" name="scan_message" read_only="true" read_only_option="instance_configured" type="string"/>
         <index name="index">
             <element name="role_type"/>
         </index>
